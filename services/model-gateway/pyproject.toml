@@ -1,0 +1,25 @@
+[project]
+name = "mip-model-gateway"
+version = "0.1.0"
+description = "Centralized model gateway"
+requires-python = ">=3.12"
+dependencies = [
+    "mip-observability",
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.32",
+    "pydantic>=2.10",
+    "numpy>=2.0",
+]
+
+[tool.uv.sources]
+mip-observability = { workspace = true }
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/mip_model_gateway"]
+
+[project.scripts]
+mip-model-gateway = "mip_model_gateway.main:run"

@@ -1,0 +1,27 @@
+[project]
+name = "mip-connector-fed"
+version = "0.1.0"
+description = "Federal Reserve press release connector"
+requires-python = ">=3.12"
+dependencies = [
+    "mip-schemas",
+    "mip-database",
+    "mip-messaging",
+    "mip-observability",
+    "httpx>=0.28",
+    "beautifulsoup4>=4.12",
+    "lxml>=5.0",
+]
+
+[tool.uv.sources]
+mip-schemas = { workspace = true }
+mip-database = { workspace = true }
+mip-messaging = { workspace = true }
+mip-observability = { workspace = true }
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/mip_connector_fed"]

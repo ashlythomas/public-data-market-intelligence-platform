@@ -1,0 +1,29 @@
+[project]
+name = "mip-connector-fred"
+version = "0.1.0"
+description = "FRED economic data connector"
+requires-python = ">=3.12"
+dependencies = [
+    "mip-connector-fed",
+    "mip-database",
+    "mip-messaging",
+    "mip-observability",
+    "httpx>=0.28",
+    "feedparser>=6.0",
+]
+
+[tool.uv.sources]
+mip-connector-fed = { workspace = true }
+mip-database = { workspace = true }
+mip-messaging = { workspace = true }
+mip-observability = { workspace = true }
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/mip_connector_fred"]
+
+[project.scripts]
+mip-connector-fred = "mip_connector_fred.runner:main"

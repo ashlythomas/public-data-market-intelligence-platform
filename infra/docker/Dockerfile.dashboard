@@ -1,0 +1,17 @@
+FROM node:20-alpine AS base
+
+WORKDIR /app
+
+COPY apps/dashboard/package.json apps/dashboard/package-lock.json* ./
+
+RUN npm install
+
+COPY apps/dashboard/ ./
+
+ENV NEXT_TELEMETRY_DISABLED=1
+
+RUN npm run build
+
+EXPOSE 3000
+
+CMD ["npm", "start"]
