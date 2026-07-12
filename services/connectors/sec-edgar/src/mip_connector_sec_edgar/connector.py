@@ -21,7 +21,7 @@ class SecEdgarConnector(BaseConnector):
 
     async def discover(self, checkpoint: dict[str, Any] | None = None) -> AsyncIterator[SourceItem]:
         self.load_checkpoint(checkpoint)
-        seen_urls: set[str] = set(self._checkpoint.get("seen_urls", []))
+        self._seen_urls: set[str] = set(self._checkpoint.get("seen_urls", []))
 
         response = await self.client.get(
             SEC_FEED,
@@ -35,7 +35,7 @@ class SecEdgarConnector(BaseConnector):
             if not link or not link.get("href"):
                 continue
             url = link["href"]
-            if url in seen_urls:
+            if url in self._seen_urls:
                 continue
             title_tag = entry.find("title")
             title = title_tag.get_text(strip=True) if title_tag else ""
@@ -50,7 +50,6 @@ class SecEdgarConnector(BaseConnector):
                     pass
             match = re.search(r"accession-number=(\d+-\d+-\d+)", url)
             external_id = match.group(1) if match else url.split("/")[-1]
-            seen_urls.add(url)
             yield SourceItem(
                 external_id=external_id,
                 url=url,
@@ -58,8 +57,11 @@ class SecEdgarConnector(BaseConnector):
                 metadata={"title": title, "form_type": "8-K"},
             )
 
-        self._checkpoint["seen_urls"] = list(seen_urls)[-500:]
         self._checkpoint["last_discover_at"] = datetime.now(UTC).isoformat()
+
+    def mark_processed(self, item: SourceItem) -> None:
+        self._seen_urls.add(item.url)
+        self._checkpoint["seen_urls"] = list(self._seen_urls)[-500:]
 
     async def fetch(self, item: SourceItem) -> RawPayload:
         response = await self.client.get(

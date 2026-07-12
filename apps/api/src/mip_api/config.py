@@ -26,6 +26,7 @@ class Settings(BaseSettings):
     oidc_issuer_url: str = ""
     oidc_client_id: str = ""
     default_tenant_id: str = "00000000-0000-0000-0000-000000000001"
+    alert_webhook_allowed_hosts: str = ""
 
 
 @lru_cache

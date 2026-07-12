@@ -103,7 +103,7 @@ async def process_raw_message(
         doc_repo = DocumentRepository(session)
 
         existing_by_id = await doc_repo.get_by_ingestion_id(document_id)
-        if existing_by_id is not None and not existing_by_id.is_canonical:
+        if existing_by_id is not None:
             DOCUMENT_THROUGHPUT.labels(service="normalizer", status="duplicate").inc()
             return
         if existing_by_id is None:

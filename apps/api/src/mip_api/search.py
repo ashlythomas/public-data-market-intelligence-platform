@@ -222,36 +222,13 @@ class SearchService:
                 result_type="document",
             )
             semantic_results = await asyncio.to_thread(self._semantic_search, query, fetch_size)
-            fused_docs = _reciprocal_rank_fusion(keyword_results, semantic_results)
-            event_results, event_total = await asyncio.to_thread(
-                self._keyword_search,
-                query,
-                filters=filters,
-                page=1,
-                page_size=fetch_size,
-                index=EVENTS_INDEX,
-                result_type="event",
-            )
-            narrative_results, narrative_total = await asyncio.to_thread(
-                self._keyword_search,
-                query,
-                filters=filters,
-                page=1,
-                page_size=fetch_size,
-                index=NARRATIVES_INDEX,
-                result_type="narrative",
-            )
-            combined = sorted(
-                [*fused_docs, *event_results, *narrative_results],
-                key=lambda item: float(item.get("score", 0.0)),
-                reverse=True,
-            )
+            combined = _reciprocal_rank_fusion(keyword_results, semantic_results)
             start_index = (page - 1) * page_size
             end_index = start_index + page_size
             elapsed_ms = (time.monotonic() - start) * 1000
             return (
                 combined[start_index:end_index],
-                doc_total + event_total + narrative_total,
+                doc_total,
                 elapsed_ms,
             )
 
@@ -264,35 +241,13 @@ class SearchService:
             index=DOCUMENTS_INDEX,
             result_type="document",
         )
-        event_results, event_total = await asyncio.to_thread(
-            self._keyword_search,
-            query,
-            filters=filters,
-            page=1,
-            page_size=fetch_size,
-            index=EVENTS_INDEX,
-            result_type="event",
-        )
-        narrative_results, narrative_total = await asyncio.to_thread(
-            self._keyword_search,
-            query,
-            filters=filters,
-            page=1,
-            page_size=fetch_size,
-            index=NARRATIVES_INDEX,
-            result_type="narrative",
-        )
-        combined = sorted(
-            [*doc_results, *event_results, *narrative_results],
-            key=lambda item: float(item.get("score", 0.0)),
-            reverse=True,
-        )
+        combined = sorted(doc_results, key=lambda item: float(item.get("score", 0.0)), reverse=True)
         start_index = (page - 1) * page_size
         end_index = start_index + page_size
         elapsed_ms = (time.monotonic() - start) * 1000
         return (
             combined[start_index:end_index],
-            doc_total + event_total + narrative_total,
+            doc_total,
             elapsed_ms,
         )
 

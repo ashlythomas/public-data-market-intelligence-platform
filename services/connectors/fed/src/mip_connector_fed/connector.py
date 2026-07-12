@@ -24,7 +24,7 @@ class FedConnector(BaseConnector):
 
     async def discover(self, checkpoint: dict[str, Any] | None = None) -> AsyncIterator[SourceItem]:
         self.load_checkpoint(checkpoint)
-        seen_urls: set[str] = set(self._checkpoint.get("seen_urls", []))
+        self._seen_urls: set[str] = set(self._checkpoint.get("seen_urls", []))
 
         response = await self.client.get(FED_PRESS_URL)
         response.raise_for_status()
@@ -38,7 +38,7 @@ class FedConnector(BaseConnector):
             if "pressreleases" not in href:
                 continue
             url = urljoin(FED_BASE_URL, href)
-            if url in seen_urls:
+            if url in self._seen_urls:
                 continue
 
             date_elem = row.select_one(".col-md-3, .result__date, time")
@@ -49,7 +49,6 @@ class FedConnector(BaseConnector):
             title = link.get_text(strip=True)
             external_id = self._extract_id(href)
 
-            seen_urls.add(url)
             yield SourceItem(
                 external_id=external_id,
                 url=url,
@@ -57,8 +56,11 @@ class FedConnector(BaseConnector):
                 metadata={"title": title},
             )
 
-        self._checkpoint["seen_urls"] = list(seen_urls)[-500:]
         self._checkpoint["last_discover_at"] = datetime.now(UTC).isoformat()
+
+    def mark_processed(self, item: SourceItem) -> None:
+        self._seen_urls.add(item.url)
+        self._checkpoint["seen_urls"] = list(self._seen_urls)[-500:]
 
     async def fetch(self, item: SourceItem) -> RawPayload:
         response = await self.client.get(item.url)

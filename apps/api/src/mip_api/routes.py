@@ -1,9 +1,13 @@
 import uuid
+import ipaddress
+import socket
 from typing import Any
 from uuid import UUID
+from urllib.parse import urlparse
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from mip_api.auth import AuthContext, audit_action, authenticate_request, require_role
+from mip_api.config import get_settings
 from mip_api.deps import get_db, get_search_service
 from mip_api.search import SearchService
 from mip_database.models import AlertRule, Source, User
@@ -91,6 +95,73 @@ def _filter_licensed_text(text: str | None, policy: LicencePolicy) -> str:
     if not text:
         return ""
     return filter_document_body(text, policy)
+
+
+def _is_public_webhook_url(
+    raw_url: str, *, allowed_hosts: set[str], allow_insecure_http: bool
+) -> bool:
+    parsed = urlparse(raw_url.strip())
+    allowed_schemes = {"https"}
+    if allow_insecure_http:
+        allowed_schemes.add("http")
+    if parsed.scheme.lower() not in allowed_schemes or not parsed.hostname:
+        return False
+    hostname = parsed.hostname.lower()
+    if allowed_hosts and hostname not in allowed_hosts:
+        return False
+
+    try:
+        addr_info = socket.getaddrinfo(
+            hostname,
+            parsed.port or (443 if parsed.scheme == "https" else 80),
+            type=socket.SOCK_STREAM,
+        )
+    except socket.gaierror:
+        return False
+
+    for _, _, _, _, sockaddr in addr_info:
+        ip = ipaddress.ip_address(sockaddr[0])
+        if (
+            ip.is_private
+            or ip.is_loopback
+            or ip.is_link_local
+            or ip.is_multicast
+            or ip.is_reserved
+            or ip.is_unspecified
+        ):
+            return False
+    return True
+
+
+def _validate_alert_delivery_config(
+    delivery_channels: list[str], delivery_config: dict[str, Any]
+) -> None:
+    if not isinstance(delivery_config, dict):
+        raise HTTPException(status_code=400, detail="delivery_config must be an object")
+
+    if "webhook" not in delivery_channels:
+        return
+
+    webhook_config = delivery_config.get("webhook")
+    webhook_url = webhook_config.get("url") if isinstance(webhook_config, dict) else None
+    if not isinstance(webhook_url, str) or not webhook_url.strip():
+        raise HTTPException(status_code=400, detail="webhook delivery requires delivery_config.webhook.url")
+
+    settings = get_settings()
+    allowed_hosts = {
+        host.strip().lower()
+        for host in settings.alert_webhook_allowed_hosts.split(",")
+        if host.strip()
+    }
+    if not _is_public_webhook_url(
+        webhook_url,
+        allowed_hosts=allowed_hosts,
+        allow_insecure_http=settings.app_env == "development",
+    ):
+        raise HTTPException(
+            status_code=400,
+            detail="webhook URL must resolve to a public host and use an allowed scheme",
+        )
 
 
 @router.get("/documents")
@@ -504,6 +575,7 @@ async def create_alert(
     )
     if user_result.scalar_one_or_none() is None:
         raise HTTPException(status_code=400, detail="User does not belong to authenticated tenant")
+    _validate_alert_delivery_config(body.delivery_channels, body.delivery_config)
 
     alert = AlertRule(
         alert_id=uuid.uuid4(),
@@ -576,6 +648,7 @@ async def update_alert(
         alert.delivery_channels = payload["delivery_channels"]
     if "delivery_config" in payload:
         alert.delivery_config = payload["delivery_config"]
+    _validate_alert_delivery_config(alert.delivery_channels, alert.delivery_config)
     if "cooldown_period_seconds" in payload:
         alert.cooldown_period_seconds = payload["cooldown_period_seconds"]
     updated = await repo.update(alert)

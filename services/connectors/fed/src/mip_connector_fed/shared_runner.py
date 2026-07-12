@@ -73,6 +73,7 @@ async def run_connector(
                     async with async_session_factory() as session:
                         existing = await session.get(RawDocument, ingestion_id)
                         if existing is not None:
+                            connector.mark_processed(item)
                             DOCUMENT_THROUGHPUT.labels(
                                 service=f"{connector.connector_name}-connector",
                                 status="duplicate",
@@ -114,6 +115,7 @@ async def run_connector(
                         producer_version=connector.connector_version,
                     )
                     await producer.publish(kafka_topic, message)
+                    connector.mark_processed(item)
                     items_ingested += 1
                     DOCUMENT_THROUGHPUT.labels(
                         service=f"{connector.connector_name}-connector", status="success"

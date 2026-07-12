@@ -18,7 +18,7 @@ class FredConnector(BaseConnector):
 
     async def discover(self, checkpoint: dict[str, Any] | None = None) -> AsyncIterator[SourceItem]:
         self.load_checkpoint(checkpoint)
-        seen_urls: set[str] = set(self._checkpoint.get("seen_urls", []))
+        self._seen_urls: set[str] = set(self._checkpoint.get("seen_urls", []))
 
         response = await self.client.get(FRED_PRESS_RSS)
         response.raise_for_status()
@@ -26,7 +26,7 @@ class FredConnector(BaseConnector):
 
         for entry in feed.entries:
             url = entry.get("link", "")
-            if not url or url in seen_urls:
+            if not url or url in self._seen_urls:
                 continue
             published_at = None
             if entry.get("published"):
@@ -35,7 +35,6 @@ class FredConnector(BaseConnector):
                 except (ValueError, TypeError):
                     pass
             external_id = entry.get("id", url)
-            seen_urls.add(url)
             yield SourceItem(
                 external_id=external_id,
                 url=url,
@@ -43,8 +42,11 @@ class FredConnector(BaseConnector):
                 metadata={"title": entry.get("title", "")},
             )
 
-        self._checkpoint["seen_urls"] = list(seen_urls)[-500:]
         self._checkpoint["last_discover_at"] = datetime.now(UTC).isoformat()
+
+    def mark_processed(self, item: SourceItem) -> None:
+        self._seen_urls.add(item.url)
+        self._checkpoint["seen_urls"] = list(self._seen_urls)[-500:]
 
     async def fetch(self, item: SourceItem) -> RawPayload:
         response = await self.client.get(item.url)
