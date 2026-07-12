@@ -116,7 +116,14 @@ def normalize_document(
         metadata.get("published_at")
     )
 
-    document_id = uuid.uuid4()
+    ingestion_id = raw_envelope.get("ingestion_id")
+    if ingestion_id:
+        document_id = uuid.UUID(str(ingestion_id))
+    else:
+        document_id = uuid.uuid5(
+            uuid.NAMESPACE_URL,
+            f"{source_id}:{raw_envelope['content_hash']}",
+        )
     return {
         "document_id": str(document_id),
         "source_id": source_id,

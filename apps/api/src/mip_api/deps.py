@@ -1,13 +1,16 @@
 from collections.abc import AsyncGenerator
-from uuid import UUID
 
-from fastapi import Header, Request
-from mip_api.config import get_settings
+from fastapi import Request
 from mip_api.search import SearchService
 from mip_database.session import async_session_factory
 from sqlalchemy.ext.asyncio import AsyncSession
 
 _search_service: SearchService | None = None
+
+
+def set_search_service(service: SearchService) -> None:
+    global _search_service
+    _search_service = service
 
 
 async def get_db() -> AsyncGenerator[AsyncSession, None]:
@@ -20,20 +23,11 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
             raise
 
 
-async def get_search_service() -> SearchService:
-    global _search_service
-    if _search_service is None:
-        _search_service = SearchService()
-        await _search_service.ensure_indices()
-    return _search_service
-
-
-async def get_tenant_id(
-    request: Request,
-    x_api_key: str | None = Header(default=None),
-    x_tenant_id: str | None = Header(default=None),
-) -> UUID:
-    settings = get_settings()
-    if x_tenant_id:
-        return UUID(x_tenant_id)
-    return UUID(settings.default_tenant_id)
+async def get_search_service(request: Request) -> SearchService:
+    """Return the SearchService from app lifespan, falling back to module singleton."""
+    service = getattr(request.app.state, "search_service", None) or _search_service
+    if service is None:
+        service = SearchService()
+        await service.ensure_indices()
+        set_search_service(service)
+    return service

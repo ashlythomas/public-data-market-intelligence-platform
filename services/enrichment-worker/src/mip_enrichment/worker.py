@@ -13,7 +13,12 @@ from mip_database.models import (
     EventEvidence,
     EvidenceSpan,
 )
-from mip_database.repositories import DocumentRepository
+from mip_database.repositories import (
+    DocumentRepository,
+    EmbeddingRepository,
+    EntityRepository,
+    SentimentRepository,
+)
 from mip_database.session import async_session_factory
 from mip_enrichment.extractors import (
     classify_topics,
@@ -27,17 +32,28 @@ from mip_observability import DOCUMENT_THROUGHPUT, setup_logging
 
 logger = logging.getLogger(__name__)
 
+SENTIMENT_MODEL_VERSION = "rule-v0.1.0"
 
-async def process_enrichment_message(message: dict[str, Any], producer: KafkaProducer) -> None:
+
+class EnrichmentResources:
+    """Reusable clients for the enrichment worker."""
+
+    def __init__(self) -> None:
+        settings = get_settings()
+        self.gateway = ModelGatewayClient(settings.model_gateway_url)
+
+
+async def process_enrichment_message(
+    message: dict[str, Any],
+    producer: KafkaProducer,
+    resources: EnrichmentResources,
+) -> None:
     payload = message.get("payload", message)
     document_id = uuid.UUID(payload["document_id"])
     body = payload.get("body", "")
     source_url = payload.get("canonical_url", "")
 
-    settings = get_settings()
-    gateway = ModelGatewayClient(settings.model_gateway_url)
-    embed_response = await gateway.embed([body[:2000]])
-    await gateway.close()
+    embed_response = await resources.gateway.embed([body[:2000]])
 
     entities_data = extract_entities(body, document_id)
     topics = classify_topics(body)
@@ -46,18 +62,27 @@ async def process_enrichment_message(message: dict[str, Any], producer: KafkaPro
 
     async with async_session_factory() as session:
         doc_repo = DocumentRepository(session)
+        entity_repo = EntityRepository(session)
+        embedding_repo = EmbeddingRepository(session)
+        sentiment_repo = SentimentRepository(session)
+
         doc = await doc_repo.get_by_id(document_id)
         if doc:
             doc.topic_labels = [t["label"] for t in topics]
-            await session.commit()
+            await session.flush()
 
         for ent in entities_data:
-            entity = Entity(
-                entity_id=uuid.uuid4(),
-                canonical_name=ent["text"],
-                entity_type=ent["entity_type"],
-            )
-            session.add(entity)
+            existing = await entity_repo.find_by_alias(ent["text"], ent["entity_type"])
+            if existing is None:
+                existing = await entity_repo.find_by_canonical_name(ent["text"], ent["entity_type"])
+            if existing is None:
+                entity = Entity(
+                    entity_id=uuid.uuid4(),
+                    canonical_name=ent["text"],
+                    entity_type=ent["entity_type"],
+                )
+                existing = await entity_repo.create(entity, aliases=[ent["text"]])
+
             session.add(
                 EntityMention(
                     mention_id=uuid.UUID(ent["mention_id"]),
@@ -66,7 +91,7 @@ async def process_enrichment_message(message: dict[str, Any], producer: KafkaPro
                     entity_type=ent["entity_type"],
                     start_offset=ent["start_offset"],
                     end_offset=ent["end_offset"],
-                    canonical_entity_id=entity.entity_id,
+                    canonical_entity_id=existing.entity_id,
                     extraction_confidence=ent["extraction_confidence"],
                     linking_confidence=0.8,
                     model_version=ent["model_version"],
@@ -81,6 +106,7 @@ async def process_enrichment_message(message: dict[str, Any], producer: KafkaPro
                 event_type=evt["event_type"],
                 action=evt["action"],
                 confidence=evt["confidence"],
+                magnitude=evt.get("magnitude"),
                 extraction_model_version=evt["extraction_model_version"],
             )
             session.add(event)
@@ -102,6 +128,13 @@ async def process_enrichment_message(message: dict[str, Any], producer: KafkaPro
                     evidence_id=uuid.UUID(evidence["evidence_id"]),
                 )
             )
+
+        await embedding_repo.upsert(
+            document_id,
+            embed_response.embeddings[0],
+            embed_response.model_version,
+        )
+        await sentiment_repo.upsert(document_id, sentiment, SENTIMENT_MODEL_VERSION)
         await session.commit()
 
     entity_msg = wrap_payload(
@@ -140,6 +173,7 @@ async def process_enrichment_message(message: dict[str, Any], producer: KafkaPro
 async def run_enrichment_worker() -> None:
     setup_logging()
     settings = get_settings()
+    resources = EnrichmentResources()
     consumer = KafkaConsumer(
         settings.kafka_bootstrap_servers,
         group_id="enrichment-worker",
@@ -151,7 +185,7 @@ async def run_enrichment_worker() -> None:
     logger.info("Enrichment worker started")
 
     async def handler(msg: dict[str, Any]) -> None:
-        await process_enrichment_message(msg, producer)
+        await process_enrichment_message(msg, producer, resources)
 
     try:
         async for _ in consumer.consume(
@@ -161,6 +195,7 @@ async def run_enrichment_worker() -> None:
     finally:
         await consumer.stop()
         await producer.stop()
+        await resources.gateway.close()
 
 
 def main() -> None:

@@ -32,3 +32,15 @@ def test_wrap_payload():
     assert "payload" in wrapped
     assert "message_id" in wrapped
     assert "occurred_at" in wrapped
+
+
+def test_wrap_payload_preserves_correlation_id():
+    correlation_id = uuid.uuid4()
+    wrapped = wrap_payload(
+        {"source_id": "fed"},
+        event_type="raw.document.ingested",
+        producer="fed-connector",
+        producer_version="0.1.0",
+        correlation_id=str(correlation_id),
+    )
+    assert wrapped["correlation_id"] == str(correlation_id)
