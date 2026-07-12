@@ -4,7 +4,7 @@ import uuid
 from datetime import UTC, datetime, timedelta
 
 import pytest
-from mip_api.signals import calculate_signal, normalize_score, time_decay
+from mip_signal_engine import calculate_signal, normalize_score, time_decay
 
 
 def test_normalize_score():

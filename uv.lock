@@ -13,7 +13,12 @@ members = [
     "mip-alert-worker",
     "mip-api",
     "mip-connector-fed",
+    "mip-connector-fred",
+    "mip-connector-gdelt",
+    "mip-connector-sec-edgar",
     "mip-database",
+    "mip-enrichment-worker",
+    "mip-intelligence-worker",
     "mip-messaging",
     "mip-model-client",
     "mip-model-gateway",
@@ -21,6 +26,7 @@ members = [
     "mip-observability",
     "mip-provenance",
     "mip-schemas",
+    "mip-signal-engine",
     "mip-source-licensing",
     "mip-test-fixtures",
 ]
@@ -414,6 +420,18 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/d3/af/a5f50ccfa659ec1802cb4ca842c23f06d906a8cc9aef6016a2caeea3d4ed/fastapi-0.139.0.tar.gz", hash = "sha256:99ab7b2d92223c76d6cf10757ab3f89d45b38267fc20b2a136cf02f6beac3145", size = 423016, upload-time = "2026-07-01T16:35:33.436Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/9e/7c/8e3c6ad324ea5cb36604fc3f968554887891c316d9dfde57761611d907ad/fastapi-0.139.0-py3-none-any.whl", hash = "sha256:cf15e1e9e667ddb0ad63811e60bd11390d1aac838ca4a7a23f421807b2308189", size = 130339, upload-time = "2026-07-01T16:35:32.19Z" },
+]
+
+[[package]]
+name = "feedparser"
+version = "6.0.12"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "sgmllib3k" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/dc/79/db7edb5e77d6dfbc54d7d9df72828be4318275b2e580549ff45a962f6461/feedparser-6.0.12.tar.gz", hash = "sha256:64f76ce90ae3e8ef5d1ede0f8d3b50ce26bcce71dd8ae5e82b1cd2d4a5f94228", size = 286579, upload-time = "2025-09-10T13:33:59.486Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/4e/eb/c96d64137e29ae17d83ad2552470bafe3a7a915e85434d9942077d7fd011/feedparser-6.0.12-py3-none-any.whl", hash = "sha256:6bbff10f5a52662c00a2e3f86a38928c37c48f77b3c511aedcd51de933549324", size = 81480, upload-time = "2025-09-10T13:33:58.022Z" },
 ]
 
 [[package]]
@@ -914,6 +932,7 @@ dependencies = [
     { name = "mip-model-client" },
     { name = "mip-observability" },
     { name = "mip-schemas" },
+    { name = "mip-signal-engine" },
     { name = "mip-source-licensing" },
     { name = "opensearch-py" },
     { name = "python-multipart" },
@@ -929,6 +948,7 @@ requires-dist = [
     { name = "mip-model-client", editable = "packages/model-client" },
     { name = "mip-observability", editable = "packages/observability" },
     { name = "mip-schemas", editable = "packages/schemas" },
+    { name = "mip-signal-engine", editable = "packages/signal-engine" },
     { name = "mip-source-licensing", editable = "packages/source-licensing" },
     { name = "opensearch-py", specifier = ">=2.7" },
     { name = "python-multipart", specifier = ">=0.0.18" },
@@ -961,6 +981,75 @@ requires-dist = [
 ]
 
 [[package]]
+name = "mip-connector-fred"
+version = "0.1.0"
+source = { editable = "services/connectors/fred" }
+dependencies = [
+    { name = "feedparser" },
+    { name = "httpx" },
+    { name = "mip-connector-fed" },
+    { name = "mip-database" },
+    { name = "mip-messaging" },
+    { name = "mip-observability" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "feedparser", specifier = ">=6.0" },
+    { name = "httpx", specifier = ">=0.28" },
+    { name = "mip-connector-fed", editable = "services/connectors/fed" },
+    { name = "mip-database", editable = "packages/database" },
+    { name = "mip-messaging", editable = "packages/messaging" },
+    { name = "mip-observability", editable = "packages/observability" },
+]
+
+[[package]]
+name = "mip-connector-gdelt"
+version = "0.1.0"
+source = { editable = "services/connectors/gdelt" }
+dependencies = [
+    { name = "httpx" },
+    { name = "mip-connector-fed" },
+    { name = "mip-database" },
+    { name = "mip-messaging" },
+    { name = "mip-observability" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "httpx", specifier = ">=0.28" },
+    { name = "mip-connector-fed", editable = "services/connectors/fed" },
+    { name = "mip-database", editable = "packages/database" },
+    { name = "mip-messaging", editable = "packages/messaging" },
+    { name = "mip-observability", editable = "packages/observability" },
+]
+
+[[package]]
+name = "mip-connector-sec-edgar"
+version = "0.1.0"
+source = { editable = "services/connectors/sec-edgar" }
+dependencies = [
+    { name = "beautifulsoup4" },
+    { name = "httpx" },
+    { name = "lxml" },
+    { name = "mip-connector-fed" },
+    { name = "mip-database" },
+    { name = "mip-messaging" },
+    { name = "mip-observability" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "beautifulsoup4", specifier = ">=4.12" },
+    { name = "httpx", specifier = ">=0.28" },
+    { name = "lxml", specifier = ">=5.0" },
+    { name = "mip-connector-fed", editable = "services/connectors/fed" },
+    { name = "mip-database", editable = "packages/database" },
+    { name = "mip-messaging", editable = "packages/messaging" },
+    { name = "mip-observability", editable = "packages/observability" },
+]
+
+[[package]]
 name = "mip-database"
 version = "0.1.0"
 source = { editable = "packages/database" }
@@ -985,6 +1074,48 @@ requires-dist = [
     { name = "psycopg", extras = ["binary"], specifier = ">=3.1" },
     { name = "pydantic-settings", specifier = ">=2.6" },
     { name = "sqlalchemy", extras = ["asyncio"], specifier = ">=2.0" },
+]
+
+[[package]]
+name = "mip-enrichment-worker"
+version = "0.1.0"
+source = { editable = "services/enrichment-worker" }
+dependencies = [
+    { name = "httpx" },
+    { name = "mip-database" },
+    { name = "mip-messaging" },
+    { name = "mip-model-client" },
+    { name = "mip-observability" },
+    { name = "mip-schemas" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "httpx", specifier = ">=0.28" },
+    { name = "mip-database", editable = "packages/database" },
+    { name = "mip-messaging", editable = "packages/messaging" },
+    { name = "mip-model-client", editable = "packages/model-client" },
+    { name = "mip-observability", editable = "packages/observability" },
+    { name = "mip-schemas", editable = "packages/schemas" },
+]
+
+[[package]]
+name = "mip-intelligence-worker"
+version = "0.1.0"
+source = { editable = "services/intelligence-worker" }
+dependencies = [
+    { name = "mip-database" },
+    { name = "mip-messaging" },
+    { name = "mip-observability" },
+    { name = "mip-signal-engine" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "mip-database", editable = "packages/database" },
+    { name = "mip-messaging", editable = "packages/messaging" },
+    { name = "mip-observability", editable = "packages/observability" },
+    { name = "mip-signal-engine", editable = "packages/signal-engine" },
 ]
 
 [[package]]
@@ -1103,6 +1234,11 @@ requires-dist = [
     { name = "pydantic", specifier = ">=2.10" },
     { name = "pydantic-settings", specifier = ">=2.6" },
 ]
+
+[[package]]
+name = "mip-signal-engine"
+version = "0.1.0"
+source = { editable = "packages/signal-engine" }
 
 [[package]]
 name = "mip-source-licensing"
@@ -1661,6 +1797,12 @@ sdist = { url = "https://files.pythonhosted.org/packages/65/da/4bef7ce7bb989b222
 wheels = [
     { url = "https://files.pythonhosted.org/packages/24/23/e84c64ad0e8bc59cd1b2ef98def848deff0ef3456c542afe74d51e9e8c85/s3transfer-0.19.1-py3-none-any.whl", hash = "sha256:d5fd7005ee39307455ad5f310b5ea67f4b1960d7fed5b3671ee50c249de675de", size = 90072, upload-time = "2026-07-10T19:32:03.673Z" },
 ]
+
+[[package]]
+name = "sgmllib3k"
+version = "1.0.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/9e/bd/3704a8c3e0942d711c1299ebf7b9091930adae6675d7c8f476a7ce48653c/sgmllib3k-1.0.0.tar.gz", hash = "sha256:7868fb1c8bfa764c1ac563d3cf369c381d1325d36124933a726f29fcdaa812e9", size = 5750, upload-time = "2010-08-24T14:33:52.445Z" }
 
 [[package]]
 name = "six"

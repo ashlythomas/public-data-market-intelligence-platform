@@ -16,11 +16,17 @@ members = [
     "packages/source-licensing",
     "packages/model-client",
     "packages/test-fixtures",
+    "packages/signal-engine",
     "apps/api",
     "apps/alert-worker",
     "apps/admin-cli",
     "services/connectors/fed",
+    "services/connectors/fred",
+    "services/connectors/sec-edgar",
+    "services/connectors/gdelt",
     "services/normalizer",
+    "services/enrichment-worker",
+    "services/intelligence-worker",
     "services/model-gateway",
 ]
 

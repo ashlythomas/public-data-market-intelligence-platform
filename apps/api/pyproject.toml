@@ -10,6 +10,7 @@ dependencies = [
     "mip-observability",
     "mip-source-licensing",
     "mip-model-client",
+    "mip-signal-engine",
     "fastapi>=0.115",
     "uvicorn[standard]>=0.32",
     "opensearch-py>=2.7",
@@ -24,6 +25,7 @@ mip-messaging = { workspace = true }
 mip-observability = { workspace = true }
 mip-source-licensing = { workspace = true }
 mip-model-client = { workspace = true }
+mip-signal-engine = { workspace = true }
 
 [build-system]
 requires = ["hatchling"]

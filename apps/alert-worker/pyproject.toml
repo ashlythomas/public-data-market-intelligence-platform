@@ -15,6 +15,9 @@ mip-database = { workspace = true }
 mip-messaging = { workspace = true }
 mip-observability = { workspace = true }
 
+[project.scripts]
+mip-alert-worker = "mip_alert_worker.runner:main"
+
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"

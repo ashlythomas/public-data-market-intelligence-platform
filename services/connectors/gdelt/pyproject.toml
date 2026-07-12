@@ -1,29 +1,28 @@
 [project]
-name = "mip-normalizer"
+name = "mip-connector-gdelt"
 version = "0.1.0"
-description = "Document normalization service"
+description = "GDELT news connector"
 requires-python = ">=3.12"
 dependencies = [
-    "mip-schemas",
+    "mip-connector-fed",
     "mip-database",
     "mip-messaging",
     "mip-observability",
-    "beautifulsoup4>=4.12",
-    "lxml>=5.0",
+    "httpx>=0.28",
 ]
 
 [tool.uv.sources]
-mip-schemas = { workspace = true }
+mip-connector-fed = { workspace = true }
 mip-database = { workspace = true }
 mip-messaging = { workspace = true }
 mip-observability = { workspace = true }
-
-[project.scripts]
-mip-normalizer-worker = "mip_normalizer.worker:main"
 
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/mip_normalizer"]
+packages = ["src/mip_connector_gdelt"]
+
+[project.scripts]
+mip-connector-gdelt = "mip_connector_gdelt.runner:main"

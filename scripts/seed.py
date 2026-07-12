@@ -6,7 +6,6 @@ import uuid
 from datetime import UTC, datetime, timedelta
 
 from mip_api.search import SearchService
-from mip_api.signals import calculate_signal
 from mip_database.models import (
     CanonicalDocument,
     Entity,
@@ -22,6 +21,7 @@ from mip_database.models import (
     User,
 )
 from mip_database.session import async_session_factory
+from mip_signal_engine import calculate_signal
 from mip_test_fixtures import FED_PRESS_RELEASE_HTML, SAMPLE_SOURCES
 
 

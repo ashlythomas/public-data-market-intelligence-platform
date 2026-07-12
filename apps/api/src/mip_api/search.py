@@ -1,8 +1,9 @@
+import asyncio
 import time
 from typing import Any
 
 from mip_api.config import get_settings
-from opensearchpy import AsyncOpenSearch
+from opensearchpy import OpenSearch
 
 DOCUMENTS_INDEX = "documents-v1"
 EVENTS_INDEX = "events-v1"
@@ -30,44 +31,61 @@ DOCUMENTS_MAPPING = {
 }
 
 
+def _reciprocal_rank_fusion(
+    keyword_results: list[dict[str, Any]],
+    semantic_results: list[dict[str, Any]],
+    k: int = 60,
+) -> list[dict[str, Any]]:
+    scores: dict[str, float] = {}
+    items: dict[str, dict[str, Any]] = {}
+    for rank, item in enumerate(keyword_results):
+        doc_id = item["id"]
+        scores[doc_id] = scores.get(doc_id, 0) + 1 / (k + rank + 1)
+        items[doc_id] = item
+    for rank, item in enumerate(semantic_results):
+        doc_id = item["id"]
+        scores[doc_id] = scores.get(doc_id, 0) + 1 / (k + rank + 1)
+        items[doc_id] = item
+    ranked = sorted(scores.items(), key=lambda x: x[1], reverse=True)
+    return [{**items[doc_id], "score": score} for doc_id, score in ranked]
+
+
 class SearchService:
     def __init__(self) -> None:
         settings = get_settings()
-        self.client = AsyncOpenSearch(
-            hosts=[settings.opensearch_url],
-            use_ssl=False,
-            verify_certs=False,
-        )
+        self._url = settings.opensearch_url
+        self.client = OpenSearch(hosts=[self._url], use_ssl=False, verify_certs=False)
 
     async def ensure_indices(self) -> None:
+        await asyncio.to_thread(self._ensure_indices_sync)
+
+    def _ensure_indices_sync(self) -> None:
         for index, mapping in [
             (DOCUMENTS_INDEX, DOCUMENTS_MAPPING),
             (EVENTS_INDEX, DOCUMENTS_MAPPING),
             (ENTITIES_INDEX, DOCUMENTS_MAPPING),
             (NARRATIVES_INDEX, DOCUMENTS_MAPPING),
         ]:
-            if not await self.client.indices.exists(index=index):
-                await self.client.indices.create(index=index, body=mapping)
+            if not self.client.indices.exists(index=index):
+                self.client.indices.create(index=index, body=mapping)
 
     async def index_document(self, doc: dict[str, Any]) -> None:
-        await self.client.index(
+        await asyncio.to_thread(
+            self.client.index,
             index=DOCUMENTS_INDEX,
             id=doc["document_id"],
             body=doc,
             refresh=True,
         )
 
-    async def search(
+    def _keyword_search(
         self,
         query: str,
         *,
-        filters: dict[str, Any] | None = None,
-        page: int = 1,
-        page_size: int = 20,
-    ) -> tuple[list[dict[str, Any]], int, float]:
-        start = time.monotonic()
-        filters = filters or {}
-
+        filters: dict[str, Any],
+        page: int,
+        page_size: int,
+    ) -> tuple[list[dict[str, Any]], int]:
         must_clauses: list[dict[str, Any]] = [
             {
                 "multi_match": {
@@ -78,7 +96,6 @@ class SearchService:
                 }
             }
         ]
-
         filter_clauses: list[dict[str, Any]] = []
         if filters.get("source_id"):
             filter_clauses.append({"term": {"source_id": filters["source_id"]}})
@@ -88,21 +105,9 @@ class SearchService:
             filter_clauses.append({"term": {"country_codes": filters["country"]}})
         if filters.get("topic"):
             filter_clauses.append({"term": {"topic_labels": filters["topic"]}})
-        if filters.get("date_from") or filters.get("date_to"):
-            date_range: dict[str, str] = {}
-            if filters.get("date_from"):
-                date_range["gte"] = filters["date_from"]
-            if filters.get("date_to"):
-                date_range["lte"] = filters["date_to"]
-            filter_clauses.append({"range": {"published_at": date_range}})
 
         body: dict[str, Any] = {
-            "query": {
-                "bool": {
-                    "must": must_clauses,
-                    "filter": filter_clauses,
-                }
-            },
+            "query": {"bool": {"must": must_clauses, "filter": filter_clauses}},
             "from": (page - 1) * page_size,
             "size": page_size,
             "highlight": {
@@ -112,10 +117,7 @@ class SearchService:
                 }
             },
         }
-
-        response = await self.client.search(index=DOCUMENTS_INDEX, body=body)
-        elapsed_ms = (time.monotonic() - start) * 1000
-
+        response = self.client.search(index=DOCUMENTS_INDEX, body=body)
         hits = response["hits"]["hits"]
         total = response["hits"]["total"]["value"]
         results = []
@@ -141,7 +143,64 @@ class SearchService:
                     },
                 }
             )
+        return results, total
+
+    def _semantic_search(self, query: str, page_size: int) -> list[dict[str, Any]]:
+        """Semantic search via more_like_this as MVP vector proxy."""
+        body = {
+            "query": {
+                "more_like_this": {
+                    "fields": ["body", "title"],
+                    "like": query,
+                    "min_term_freq": 1,
+                }
+            },
+            "size": page_size,
+        }
+        try:
+            response = self.client.search(index=DOCUMENTS_INDEX, body=body)
+        except Exception:
+            return []
+        return [
+            {
+                "id": hit["_source"].get("document_id", hit["_id"]),
+                "type": "document",
+                "title": hit["_source"].get("title"),
+                "snippet": hit["_source"].get("summary", "")[:200],
+                "score": hit["_score"],
+                "source_id": hit["_source"].get("source_id"),
+                "published_at": hit["_source"].get("published_at"),
+                "provenance": {"document_id": hit["_source"].get("document_id")},
+            }
+            for hit in response["hits"]["hits"]
+        ]
+
+    async def search(
+        self,
+        query: str,
+        *,
+        filters: dict[str, Any] | None = None,
+        page: int = 1,
+        page_size: int = 20,
+        hybrid: bool = True,
+    ) -> tuple[list[dict[str, Any]], int, float]:
+        start = time.monotonic()
+        filters = filters or {}
+
+        if hybrid:
+            keyword_results, total = await asyncio.to_thread(
+                self._keyword_search, query, filters=filters, page=page, page_size=page_size
+            )
+            semantic_results = await asyncio.to_thread(self._semantic_search, query, page_size)
+            fused = _reciprocal_rank_fusion(keyword_results, semantic_results)
+            elapsed_ms = (time.monotonic() - start) * 1000
+            return fused[:page_size], total, elapsed_ms
+
+        results, total = await asyncio.to_thread(
+            self._keyword_search, query, filters=filters, page=page, page_size=page_size
+        )
+        elapsed_ms = (time.monotonic() - start) * 1000
         return results, total, elapsed_ms
 
     async def close(self) -> None:
-        await self.client.close()
+        pass

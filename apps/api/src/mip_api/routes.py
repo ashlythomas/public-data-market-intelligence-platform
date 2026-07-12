@@ -15,6 +15,7 @@ from mip_database.repositories import (
     EvidenceRepository,
     NarrativeRepository,
     SignalRepository,
+    SourceRepository,
 )
 from mip_schemas.api import (
     ErrorDetail,
@@ -94,10 +95,12 @@ async def get_document(
     doc = await repo.get_by_id(document_id)
     if not doc:
         raise _error("DOCUMENT_NOT_FOUND", "The requested document does not exist.", request)
+    source_repo = SourceRepository(session)
+    source = await source_repo.get_by_id(doc.source_id)
     policy = LicencePolicy(
-        licence_type="public_domain",
-        redistribution_allowed=True,
-        commercial_use_allowed=True,
+        licence_type=source.licence_type if source else "public_domain",
+        redistribution_allowed=source.redistribution_allowed if source else True,
+        commercial_use_allowed=source.commercial_use_allowed if source else True,
     )
     return {
         "document_id": str(doc.document_id),
@@ -289,6 +292,63 @@ async def get_narrative(
         "started_at": narrative.started_at.isoformat(),
         "last_updated_at": narrative.last_updated_at.isoformat(),
     }
+
+
+@router.get("/narratives/{narrative_id}/timeline")
+async def get_narrative_timeline(
+    narrative_id: UUID,
+    request: Request,
+    session: AsyncSession = Depends(get_db),
+    tenant_id: UUID = Depends(get_tenant_id),
+) -> list[dict[str, Any]]:
+    from mip_database.models import Event, NarrativeEvent
+
+    repo = NarrativeRepository(session)
+    narrative = await repo.get_by_id(narrative_id)
+    if not narrative:
+        raise _error("NARRATIVE_NOT_FOUND", "The requested narrative does not exist.", request)
+
+    from sqlalchemy import select
+
+    result = await session.execute(
+        select(Event, NarrativeEvent)
+        .join(NarrativeEvent, NarrativeEvent.event_id == Event.event_id)
+        .where(NarrativeEvent.narrative_id == narrative_id)
+        .order_by(Event.event_time.desc().nullslast())
+    )
+    timeline = []
+    for event, _ in result.all():
+        timeline.append(
+            {
+                "event_id": str(event.event_id),
+                "event_type": event.event_type,
+                "action": event.action,
+                "confidence": event.confidence,
+                "event_time": event.event_time.isoformat() if event.event_time else None,
+            }
+        )
+    return timeline
+
+
+@router.get("/signals/timeseries")
+async def get_signals_timeseries(
+    signal_type: str | None = None,
+    session: AsyncSession = Depends(get_db),
+    tenant_id: UUID = Depends(get_tenant_id),
+) -> list[dict[str, Any]]:
+    repo = SignalRepository(session)
+    signals, _ = await repo.list_signals(page=1, page_size=100, signal_type=signal_type)
+    return [
+        {
+            "signal_id": str(s.signal_id),
+            "signal_type": s.signal_type,
+            "score": s.score,
+            "confidence": s.confidence,
+            "generated_at": s.generated_at.isoformat(),
+            "component_scores": s.component_scores,
+        }
+        for s in signals
+    ]
 
 
 @router.get("/signals")

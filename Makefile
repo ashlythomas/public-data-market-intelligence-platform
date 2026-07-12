@@ -18,6 +18,12 @@ migrate:
 seed:
 	uv run python scripts/seed.py
 
+ingest:
+	uv run python workflows/scheduled-ingestion/runner.py
+
+workers:
+	@echo "Start workers via: docker compose up normalizer-worker enrichment-worker intelligence-worker alert-worker"
+
 test:
 	uv run pytest tests/unit -v --tb=short
 

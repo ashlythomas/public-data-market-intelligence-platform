@@ -57,10 +57,43 @@ make test
 - `POST /v1/search` — Hybrid document search
 - `POST/GET/PATCH/DELETE /v1/alerts` — Alert rules
 
-### Running the Fed Connector
+### Running Connectors
 
 ```bash
+# Individual connectors
 uv run python -m mip_connector_fed.runner
+uv run python -m mip_connector_fred.runner
+uv run python -m mip_connector_sec_edgar.runner
+uv run python -m mip_connector_gdelt.runner
+
+# Scheduled ingestion (all connectors)
+make ingest
+```
+
+### Pipeline Workers
+
+The Kafka processing pipeline connects ingestion to intelligence:
+
+```
+raw.*.v1 → normalizer-worker → documents.enrichment-requested.v1
+         → enrichment-worker → events.extracted.v1 / embeddings.generated.v1
+         → intelligence-worker → signals.generated.v1 / alerts.candidate.v1
+         → alert-worker → email / webhook delivery
+```
+
+Start workers with Docker Compose:
+
+```bash
+docker compose up normalizer-worker enrichment-worker intelligence-worker alert-worker
+```
+
+Or individually:
+
+```bash
+uv run mip-normalizer-worker
+uv run mip-enrichment-worker
+uv run mip-intelligence-worker
+uv run mip-alert-worker
 ```
 
 ### Environment Variables
