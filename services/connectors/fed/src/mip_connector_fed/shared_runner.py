@@ -20,6 +20,27 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+def _raw_document_envelope(
+    raw_document: RawDocument, *, tenant_id: str
+) -> dict[str, str | dict | None]:
+    return {
+        "ingestion_id": str(raw_document.ingestion_id),
+        "source_id": raw_document.source_id,
+        "external_id": raw_document.external_id,
+        "source_url": raw_document.source_url,
+        "retrieved_at": raw_document.retrieved_at.isoformat(),
+        "published_at": raw_document.published_at.isoformat()
+        if raw_document.published_at
+        else None,
+        "content_type": raw_document.content_type,
+        "object_store_uri": raw_document.object_store_uri,
+        "content_hash": raw_document.content_hash,
+        "connector_version": raw_document.connector_version,
+        "metadata": raw_document.metadata_ or {},
+        "tenant_id": tenant_id,
+    }
+
+
 async def run_connector(
     connector: "BaseConnector",
     *,
@@ -73,6 +94,14 @@ async def run_connector(
                     async with async_session_factory() as session:
                         existing = await session.get(RawDocument, ingestion_id)
                         if existing is not None:
+                            envelope = _raw_document_envelope(existing, tenant_id=tenant_id)
+                            message = wrap_payload(
+                                envelope,
+                                event_type="raw.document.ingested",
+                                producer=f"{connector.connector_name}-connector",
+                                producer_version=existing.connector_version,
+                            )
+                            await producer.publish(kafka_topic, message)
                             connector.mark_processed(item)
                             DOCUMENT_THROUGHPUT.labels(
                                 service=f"{connector.connector_name}-connector",

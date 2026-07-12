@@ -155,6 +155,11 @@ def _validate_alert_delivery_config(
         for host in settings.alert_webhook_allowed_hosts.split(",")
         if host.strip()
     }
+    if settings.app_env != "development" and not allowed_hosts:
+        raise HTTPException(
+            status_code=400,
+            detail="webhook delivery requires ALERT_WEBHOOK_ALLOWED_HOSTS in non-development environments",
+        )
     if not _is_public_webhook_url(
         webhook_url,
         allowed_hosts=allowed_hosts,
