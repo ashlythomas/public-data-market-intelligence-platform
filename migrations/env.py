@@ -18,10 +18,13 @@ target_metadata = Base.metadata
 
 
 def get_url() -> str:
-    return os.environ.get(
+    url = os.environ.get(
         "DATABASE_URL",
         "postgresql://mip:mip_dev_password@localhost:5432/market_intelligence",
     ).replace("+asyncpg", "")
+    if url.startswith("postgresql://"):
+        url = url.replace("postgresql://", "postgresql+psycopg://", 1)
+    return url
 
 
 def run_migrations_offline() -> None:
