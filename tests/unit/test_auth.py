@@ -16,6 +16,7 @@ async def test_authenticate_development_fallback():
 
     with patch("mip_api.auth.get_settings") as mock_settings:
         mock_settings.return_value.app_env = "development"
+        mock_settings.return_value.allow_dev_auth = True
         mock_settings.return_value.default_tenant_id = "00000000-0000-0000-0000-000000000001"
 
         auth = await authenticate_request(request, session=session, x_api_key=None)
@@ -23,6 +24,20 @@ async def test_authenticate_development_fallback():
     assert isinstance(auth, AuthContext)
     assert auth.tenant_id == uuid.UUID("00000000-0000-0000-0000-000000000001")
     assert auth.role == "analyst"
+
+
+@pytest.mark.asyncio
+async def test_authenticate_development_fails_closed_without_explicit_flag():
+    request = MagicMock()
+    request.state = MagicMock()
+    session = AsyncMock()
+
+    with patch("mip_api.auth.get_settings") as mock_settings:
+        mock_settings.return_value.app_env = "development"
+        mock_settings.return_value.allow_dev_auth = False
+        with pytest.raises(HTTPException) as exc:
+            await authenticate_request(request, session=session, x_api_key=None)
+    assert exc.value.status_code == 401
 
 
 @pytest.mark.asyncio

@@ -5,10 +5,14 @@ import logging
 import uuid
 from typing import Any
 
-from mip_alert_worker.evaluator import evaluate_alert_candidate, record_delivery
+from mip_alert_worker.evaluator import (
+    delivery_was_successful,
+    evaluate_alert_candidate,
+    record_delivery,
+)
 from mip_alert_worker.worker import deliver_email, deliver_webhook
 from mip_database.config import get_settings
-from mip_messaging import KafkaConsumer
+from mip_messaging import KafkaConsumer, KafkaProducer
 from mip_observability import setup_logging
 
 logger = logging.getLogger(__name__)
@@ -22,6 +26,9 @@ async def process_alert_message(message: dict[str, Any]) -> None:
         channel = task["channel"]
         delivery_payload = task["delivery_payload"]
         alert_id = uuid.UUID(task["alert_id"])
+        signal_id = str(delivery_payload.get("signal_id", "unknown"))
+        if await delivery_was_successful(alert_id, channel, signal_id):
+            continue
         success = False
         error = None
         try:
@@ -55,17 +62,24 @@ async def run_alert_worker() -> None:
         group_id="alert-worker",
         topics=["alerts.candidate.v1"],
     )
+    producer = KafkaProducer(settings.kafka_bootstrap_servers)
     await consumer.start()
+    await producer.start()
     logger.info("Alert worker started")
 
     async def handler(msg: dict[str, Any]) -> None:
         await process_alert_message(msg)
 
     try:
-        async for _ in consumer.consume(handler):
+        async for _ in consumer.consume(
+            handler,
+            dlq_producer=producer,
+            dlq_topic="dlq.persistence.v1",
+        ):
             pass
     finally:
         await consumer.stop()
+        await producer.stop()
 
 
 def main() -> None:

@@ -1,5 +1,6 @@
 """Shared connector runner utilities."""
 
+import asyncio
 import logging
 import uuid
 from datetime import UTC, datetime
@@ -11,6 +12,7 @@ from mip_database.session import async_session_factory
 from mip_database.storage import ObjectStorage
 from mip_messaging import KafkaProducer, wrap_payload
 from mip_observability import CONNECTOR_LAG, DOCUMENT_THROUGHPUT, setup_logging
+from sqlalchemy import select
 
 if TYPE_CHECKING:
     from mip_connector_fed.base import BaseConnector
@@ -41,28 +43,43 @@ async def run_connector(
     final_checkpoint: dict | None = None
 
     async with async_session_factory() as session:
+        checkpoint_result = await session.execute(
+            select(IngestionRun.checkpoint)
+            .where(
+                IngestionRun.source_id == source_id,
+                IngestionRun.status == "completed",
+                IngestionRun.checkpoint.is_not(None),
+            )
+            .order_by(IngestionRun.completed_at.desc())
+            .limit(1)
+        )
+        previous_checkpoint = checkpoint_result.scalar_one_or_none()
         run = IngestionRun(run_id=run_id, source_id=source_id, status="running")
         session.add(run)
         await session.commit()
 
     try:
         async with connector:
-            async for item in connector.discover(None):
+            connector.load_checkpoint(previous_checkpoint)
+            async for item in connector.discover(previous_checkpoint):
                 try:
                     payload = await connector.fetch_with_retry(item)
-                    ingestion_id = uuid.uuid4()
-                    extension = "html" if "html" in payload.content_type else "bin"
-                    uri, content_hash = storage.store_raw(
-                        source_id=source_id,
-                        ingestion_id=ingestion_id,
-                        content=payload.content,
-                        extension=extension,
-                        retrieved_at=datetime.now(UTC),
+                    ingestion_id = uuid.uuid5(
+                        uuid.NAMESPACE_URL,
+                        f"{source_id}:{payload.external_id or payload.source_url}",
                     )
-
                     async with async_session_factory() as session:
                         existing = await session.get(RawDocument, ingestion_id)
                         if existing is None:
+                            extension = "html" if "html" in payload.content_type else "bin"
+                            uri, content_hash = await asyncio.to_thread(
+                                storage.store_raw,
+                                source_id=source_id,
+                                ingestion_id=ingestion_id,
+                                content=payload.content,
+                                extension=extension,
+                                retrieved_at=datetime.now(UTC),
+                            )
                             session.add(
                                 RawDocument(
                                     ingestion_id=ingestion_id,
@@ -79,6 +96,8 @@ async def run_connector(
                                 )
                             )
                             await session.commit()
+                        else:
+                            uri = existing.object_store_uri
 
                     envelope = connector.build_envelope(payload, uri, ingestion_id)
                     message = wrap_payload(
@@ -106,7 +125,7 @@ async def run_connector(
     async with async_session_factory() as session:
         run = await session.get(IngestionRun, run_id)
         if run:
-            run.status = "completed"
+            run.status = "completed" if items_failed == 0 else "partial"
             run.completed_at = datetime.now(UTC)
             run.items_ingested = items_ingested
             run.items_failed = items_failed

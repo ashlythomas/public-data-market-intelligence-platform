@@ -25,9 +25,13 @@ def extract_entities(text: str, document_id: uuid.UUID) -> list[dict[str, Any]]:
     mentions = []
     for entity_type, pattern in ENTITY_PATTERNS:
         for match in re.finditer(pattern, text, re.IGNORECASE):
+            mention_id = uuid.uuid5(
+                document_id,
+                f"mention:{entity_type}:{match.start()}:{match.end()}:{match.group(0).lower()}",
+            )
             mentions.append(
                 {
-                    "mention_id": str(uuid.uuid4()),
+                    "mention_id": str(mention_id),
                     "document_id": str(document_id),
                     "text": match.group(0),
                     "entity_type": entity_type,
@@ -78,10 +82,14 @@ def extract_events(
     for event_type, pattern, action in patterns:
         match = re.search(pattern, text, re.IGNORECASE)
         if match:
-            evidence_id = uuid.uuid4()
+            event_id = uuid.uuid5(
+                document_id,
+                f"event:{event_type}:{match.start()}:{match.end()}",
+            )
+            evidence_id = uuid.uuid5(event_id, "evidence")
             events.append(
                 {
-                    "event_id": str(uuid.uuid4()),
+                    "event_id": str(event_id),
                     "document_id": str(document_id),
                     "event_type": event_type,
                     "action": action,

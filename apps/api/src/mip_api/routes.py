@@ -4,10 +4,9 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from mip_api.auth import AuthContext, audit_action, authenticate_request, require_role
-from mip_api.config import get_settings
 from mip_api.deps import get_db, get_search_service
 from mip_api.search import SearchService
-from mip_database.models import AlertRule, Source
+from mip_database.models import AlertRule, Source, User
 from mip_database.repositories import (
     AlertRepository,
     DocumentRepository,
@@ -26,9 +25,25 @@ from mip_schemas.api import (
     SearchResponse,
 )
 from mip_source_licensing import LicencePolicy, can_serve_full_content, filter_document_body
+from pydantic import BaseModel, Field
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 router = APIRouter(prefix="/v1")
+
+
+class AlertCreateRequest(BaseModel):
+    user_id: UUID
+    name: str = Field(min_length=1, max_length=255)
+    entity_ids: list[str] = Field(default_factory=list)
+    topic_labels: list[str] = Field(default_factory=list)
+    event_types: list[str] = Field(default_factory=list)
+    signal_types: list[str] = Field(default_factory=list)
+    minimum_confidence: float = Field(default=0.5, ge=0.0, le=1.0)
+    minimum_score: float = Field(default=0.5, ge=0.0, le=1.0)
+    countries: list[str] = Field(default_factory=list)
+    delivery_channels: list[str] = Field(default_factory=lambda: ["email"])
+    cooldown_period_seconds: int = Field(default=3600, ge=0)
 
 
 def _error(code: str, message: str, request: Request, details: dict | None = None) -> HTTPException:
@@ -49,27 +64,24 @@ def _error(code: str, message: str, request: Request, details: dict | None = Non
 def _policy_from_source(source: Source | None) -> LicencePolicy:
     if source is None:
         return LicencePolicy(
-            licence_type="public_domain",
-            redistribution_allowed=True,
-            commercial_use_allowed=True,
+            licence_type="unknown",
+            redistribution_allowed=False,
+            commercial_use_allowed=False,
+            quotation_limit=200,
         )
     return LicencePolicy(
         licence_type=source.licence_type,
         redistribution_allowed=source.redistribution_allowed,
         commercial_use_allowed=source.commercial_use_allowed,
+        quotation_limit=200 if not source.redistribution_allowed else None,
         attribution_required=source.licence_type == "attribution_required",
     )
 
 
-def _filter_snippet(snippet: str | None, policy: LicencePolicy) -> str | None:
-    if not snippet:
-        return snippet
-    if not policy.redistribution_allowed:
-        if policy.quotation_allowed:
-            limit = policy.quotation_limit or 200
-            return snippet[:limit]
-        return None
-    return snippet
+def _filter_licensed_text(text: str | None, policy: LicencePolicy) -> str:
+    if not text:
+        return ""
+    return filter_document_body(text, policy)
 
 
 @router.get("/documents")
@@ -128,7 +140,7 @@ async def get_document(
         "source_id": doc.source_id,
         "title": doc.title,
         "body": filter_document_body(doc.body, policy),
-        "summary": doc.summary,
+        "summary": _filter_licensed_text(doc.summary, policy),
         "language": doc.language,
         "published_at": doc.published_at.isoformat() if doc.published_at else None,
         "topic_labels": doc.topic_labels,
@@ -149,6 +161,8 @@ async def get_document_evidence(
     doc = await doc_repo.get_by_id(document_id)
     if not doc:
         raise _error("DOCUMENT_NOT_FOUND", "The requested document does not exist.", request)
+    source = await SourceRepository(session).get_by_id(doc.source_id)
+    policy = _policy_from_source(source)
     evidence_repo = EvidenceRepository(session)
     spans = await evidence_repo.get_by_document(document_id)
     return [
@@ -156,7 +170,7 @@ async def get_document_evidence(
             "evidence_id": str(s.evidence_id),
             "start_offset": s.start_offset,
             "end_offset": s.end_offset,
-            "text": s.text,
+            "text": _filter_licensed_text(s.text, policy),
             "source_url": s.source_url,
             "confidence": s.confidence,
             "model_version": s.model_version,
@@ -453,7 +467,7 @@ async def search(
             SearchResult(
                 **{
                     **r,
-                    "snippet": _filter_snippet(r.get("snippet"), policy),
+                    "snippet": _filter_licensed_text(r.get("snippet"), policy),
                 }
             )
         )
@@ -468,25 +482,34 @@ async def search(
 
 @router.post("/alerts")
 async def create_alert(
-    body: dict[str, Any],
+    body: AlertCreateRequest,
     session: AsyncSession = Depends(get_db),
     auth: AuthContext = Depends(require_role("admin", "analyst")),
 ) -> dict[str, Any]:
-    settings = get_settings()
+    user_result = await session.execute(
+        select(User).where(
+            User.user_id == body.user_id,
+            User.tenant_id == auth.tenant_id,
+            User.active.is_(True),
+        )
+    )
+    if user_result.scalar_one_or_none() is None:
+        raise HTTPException(status_code=400, detail="User does not belong to authenticated tenant")
+
     alert = AlertRule(
         alert_id=uuid.uuid4(),
         tenant_id=auth.tenant_id,
-        user_id=uuid.UUID(body.get("user_id", settings.default_tenant_id)),
-        name=body["name"],
-        entity_ids=body.get("entity_ids", []),
-        topic_labels=body.get("topic_labels", []),
-        event_types=body.get("event_types", []),
-        signal_types=body.get("signal_types", []),
-        minimum_confidence=body.get("minimum_confidence", 0.5),
-        minimum_score=body.get("minimum_score", 0.5),
-        countries=body.get("countries", []),
-        delivery_channels=body.get("delivery_channels", ["email"]),
-        cooldown_period_seconds=body.get("cooldown_period", 3600),
+        user_id=body.user_id,
+        name=body.name,
+        entity_ids=body.entity_ids,
+        topic_labels=body.topic_labels,
+        event_types=body.event_types,
+        signal_types=body.signal_types,
+        minimum_confidence=body.minimum_confidence,
+        minimum_score=body.minimum_score,
+        countries=body.countries,
+        delivery_channels=body.delivery_channels,
+        cooldown_period_seconds=body.cooldown_period_seconds,
         active=True,
     )
     repo = AlertRepository(session)
@@ -498,7 +521,7 @@ async def create_alert(
         action="alert.create",
         resource_type="alert_rule",
         resource_id=str(created.alert_id),
-        details={"name": created.name},
+        details={"name": created.name, "user_id": str(body.user_id)},
     )
     return {"alert_id": str(created.alert_id), "name": created.name, "active": created.active}
 

@@ -72,6 +72,9 @@ async def process_enrichment_message(
             await session.flush()
 
         for ent in entities_data:
+            mention_id = uuid.UUID(ent["mention_id"])
+            if await session.get(EntityMention, mention_id):
+                continue
             existing = await entity_repo.find_by_alias(ent["text"], ent["entity_type"])
             if existing is None:
                 existing = await entity_repo.find_by_canonical_name(ent["text"], ent["entity_type"])
@@ -85,7 +88,7 @@ async def process_enrichment_message(
 
             session.add(
                 EntityMention(
-                    mention_id=uuid.UUID(ent["mention_id"]),
+                    mention_id=mention_id,
                     document_id=document_id,
                     text=ent["text"],
                     entity_type=ent["entity_type"],
@@ -100,8 +103,11 @@ async def process_enrichment_message(
 
         for evt in events_data:
             evidence = evt["evidence"]
+            event_id = uuid.UUID(evt["event_id"])
+            if await session.get(Event, event_id):
+                continue
             event = Event(
-                event_id=uuid.UUID(evt["event_id"]),
+                event_id=event_id,
                 document_id=document_id,
                 event_type=evt["event_type"],
                 action=evt["action"],
@@ -124,7 +130,7 @@ async def process_enrichment_message(
             )
             session.add(
                 EventEvidence(
-                    event_id=uuid.UUID(evt["event_id"]),
+                    event_id=event_id,
                     evidence_id=uuid.UUID(evidence["evidence_id"]),
                 )
             )

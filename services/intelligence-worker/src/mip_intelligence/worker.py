@@ -19,6 +19,7 @@ logger = logging.getLogger(__name__)
 
 async def process_events_message(message: dict[str, Any], producer: KafkaProducer) -> None:
     payload = message.get("payload", message)
+    settings = get_settings()
     events_data = payload.get("events", [])
     document_id = payload.get("document_id")
 
@@ -68,8 +69,10 @@ async def process_events_message(message: dict[str, Any], producer: KafkaProduce
                     "signal_id": str(signal.signal_id),
                     "signal_type": signal.signal_type,
                     "score": signal.score,
+                    "confidence": signal.confidence,
                     "narrative_id": str(narrative.narrative_id),
                     "document_id": document_id,
+                    "tenant_id": settings.default_tenant_id,
                 },
                 event_type="signal.generated",
                 producer="intelligence-worker",
@@ -82,7 +85,13 @@ async def process_events_message(message: dict[str, Any], producer: KafkaProduce
                     "signal_id": str(signal.signal_id),
                     "signal_type": signal.signal_type,
                     "score": signal.score,
+                    "confidence": signal.confidence,
                     "narrative_id": str(narrative.narrative_id),
+                    "tenant_id": settings.default_tenant_id,
+                    "event_type": event.event_type,
+                    "topic_labels": topic_labels,
+                    "entity_ids": [],
+                    "countries": [],
                 },
                 event_type="alert.candidate",
                 producer="intelligence-worker",
@@ -110,7 +119,11 @@ async def run_intelligence_worker() -> None:
         await process_events_message(msg, producer)
 
     try:
-        async for _ in consumer.consume(handler):
+        async for _ in consumer.consume(
+            handler,
+            dlq_producer=producer,
+            dlq_topic="dlq.persistence.v1",
+        ):
             pass
     finally:
         await consumer.stop()

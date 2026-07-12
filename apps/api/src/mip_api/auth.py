@@ -42,7 +42,7 @@ async def authenticate_request(
         request.state.role = api_key.role
         return AuthContext(tenant_id=api_key.tenant_id, role=api_key.role)
 
-    if settings.app_env == "development":
+    if settings.app_env == "development" and settings.allow_dev_auth:
         tenant_id = uuid.UUID(settings.default_tenant_id)
         request.state.tenant_id = str(tenant_id)
         request.state.role = "analyst"
