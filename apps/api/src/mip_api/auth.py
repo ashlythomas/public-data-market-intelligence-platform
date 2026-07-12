@@ -5,7 +5,6 @@ import time
 import uuid
 from dataclasses import dataclass
 
-import redis.asyncio as redis
 from fastapi import Depends, Header, HTTPException, Request
 from mip_api.config import get_settings
 from mip_api.deps import get_db
@@ -14,7 +13,12 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 RATE_LIMIT_WINDOW_SECONDS = 60
-_redis_client: redis.Redis | None = None
+try:
+    import redis.asyncio as redis
+except ModuleNotFoundError:  # pragma: no cover - dependency installed in runtime image
+    redis = None  # type: ignore[assignment]
+
+_redis_client: "redis.Redis | None" = None
 
 
 @dataclass(frozen=True)
@@ -27,7 +31,9 @@ def hash_api_key(key: str) -> str:
     return hashlib.sha256(key.encode()).hexdigest()
 
 
-def _get_redis_client() -> redis.Redis:
+def _get_redis_client() -> "redis.Redis":
+    if redis is None:  # pragma: no cover - handled by runtime dependency installation
+        raise RuntimeError("redis package is not installed")
     global _redis_client
     if _redis_client is None:
         settings = get_settings()
@@ -57,7 +63,7 @@ async def authenticate_request(
             count = await limiter.incr(bucket_key)
             if count == 1:
                 await limiter.expire(bucket_key, RATE_LIMIT_WINDOW_SECONDS)
-        except redis.RedisError as exc:  # pragma: no cover - network failures are environment-specific
+        except Exception as exc:  # pragma: no cover - network failures are environment-specific
             raise HTTPException(status_code=503, detail="Rate limiter unavailable") from exc
         if count > api_key.rate_limit:
             raise HTTPException(status_code=429, detail="API key rate limit exceeded")
