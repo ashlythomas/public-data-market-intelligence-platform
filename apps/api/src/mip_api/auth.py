@@ -1,10 +1,11 @@
 """API authentication and tenant isolation."""
 
 import hashlib
+import time
 import uuid
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
 
+import redis.asyncio as redis
 from fastapi import Depends, Header, HTTPException, Request
 from mip_api.config import get_settings
 from mip_api.deps import get_db
@@ -12,8 +13,8 @@ from mip_database.models import ApiKey, AuditLog
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-RATE_LIMIT_WINDOW = timedelta(minutes=1)
-_rate_limit_windows: dict[str, tuple[datetime, int]] = {}
+RATE_LIMIT_WINDOW_SECONDS = 60
+_redis_client: redis.Redis | None = None
 
 
 @dataclass(frozen=True)
@@ -24,6 +25,14 @@ class AuthContext:
 
 def hash_api_key(key: str) -> str:
     return hashlib.sha256(key.encode()).hexdigest()
+
+
+def _get_redis_client() -> redis.Redis:
+    global _redis_client
+    if _redis_client is None:
+        settings = get_settings()
+        _redis_client = redis.from_url(settings.redis_url, decode_responses=True)
+    return _redis_client
 
 
 async def authenticate_request(
@@ -42,15 +51,16 @@ async def authenticate_request(
         api_key = result.scalar_one_or_none()
         if not api_key:
             raise HTTPException(status_code=401, detail="Invalid API key")
-
-        now = datetime.now(UTC)
-        window_start, current_count = _rate_limit_windows.get(key_hash, (now, 0))
-        if now - window_start >= RATE_LIMIT_WINDOW:
-            window_start = now
-            current_count = 0
-        if current_count >= api_key.rate_limit:
+        limiter = _get_redis_client()
+        bucket_key = f"api-rate:{key_hash}:{int(time.time()) // RATE_LIMIT_WINDOW_SECONDS}"
+        try:
+            count = await limiter.incr(bucket_key)
+            if count == 1:
+                await limiter.expire(bucket_key, RATE_LIMIT_WINDOW_SECONDS)
+        except redis.RedisError as exc:  # pragma: no cover - network failures are environment-specific
+            raise HTTPException(status_code=503, detail="Rate limiter unavailable") from exc
+        if count > api_key.rate_limit:
             raise HTTPException(status_code=429, detail="API key rate limit exceeded")
-        _rate_limit_windows[key_hash] = (window_start, current_count + 1)
 
         request.state.tenant_id = str(api_key.tenant_id)
         request.state.role = api_key.role

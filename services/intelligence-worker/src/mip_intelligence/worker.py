@@ -19,8 +19,9 @@ logger = logging.getLogger(__name__)
 
 async def process_events_message(message: dict[str, Any], producer: KafkaProducer) -> None:
     payload = message.get("payload", message)
-    settings = get_settings()
-    tenant_id = str(payload.get("tenant_id") or settings.default_tenant_id)
+    tenant_id = payload.get("tenant_id")
+    if not tenant_id:
+        raise ValueError("events.extracted payload missing tenant_id")
     events_data = payload.get("events", [])
     document_id = payload.get("document_id")
 

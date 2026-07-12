@@ -43,6 +43,7 @@ class AlertCreateRequest(BaseModel):
     minimum_score: float = Field(default=0.5, ge=0.0, le=1.0)
     countries: list[str] = Field(default_factory=list)
     delivery_channels: list[str] = Field(default_factory=lambda: ["email"])
+    delivery_config: dict[str, Any] = Field(default_factory=dict)
     cooldown_period_seconds: int = Field(default=3600, ge=0)
 
 
@@ -509,6 +510,7 @@ async def create_alert(
         minimum_score=body.minimum_score,
         countries=body.countries,
         delivery_channels=body.delivery_channels,
+        delivery_config=body.delivery_config,
         cooldown_period_seconds=body.cooldown_period_seconds,
         active=True,
     )

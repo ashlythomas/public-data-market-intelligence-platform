@@ -64,56 +64,47 @@ async def run_connector(
             async for item in connector.discover(previous_checkpoint):
                 try:
                     payload = await connector.fetch_with_retry(item)
+                    content_hash = connector.content_hash(payload.content)
                     ingestion_id = uuid.uuid5(
                         uuid.NAMESPACE_URL,
-                        f"{source_id}:{payload.external_id or payload.source_url}",
+                        f"{source_id}:{payload.external_id or payload.source_url}:{content_hash}",
                     )
                     async with async_session_factory() as session:
                         existing = await session.get(RawDocument, ingestion_id)
-                        if existing is None:
-                            extension = "html" if "html" in payload.content_type else "bin"
-                            uri, content_hash = await asyncio.to_thread(
-                                storage.store_raw,
-                                source_id=source_id,
+                        if existing is not None:
+                            DOCUMENT_THROUGHPUT.labels(
+                                service=f"{connector.connector_name}-connector",
+                                status="duplicate",
+                            ).inc()
+                            continue
+
+                        extension = "html" if "html" in payload.content_type else "bin"
+                        uri, stored_hash = await asyncio.to_thread(
+                            storage.store_raw,
+                            source_id=source_id,
+                            ingestion_id=ingestion_id,
+                            content=payload.content,
+                            extension=extension,
+                            retrieved_at=datetime.now(UTC),
+                        )
+                        session.add(
+                            RawDocument(
                                 ingestion_id=ingestion_id,
-                                content=payload.content,
-                                extension=extension,
+                                source_id=source_id,
+                                external_id=payload.external_id,
+                                source_url=payload.source_url,
                                 retrieved_at=datetime.now(UTC),
+                                published_at=payload.published_at,
+                                content_type=payload.content_type,
+                                object_store_uri=uri,
+                                content_hash=stored_hash,
+                                connector_version=connector.connector_version,
+                                metadata_=payload.metadata,
                             )
-                            session.add(
-                                RawDocument(
-                                    ingestion_id=ingestion_id,
-                                    source_id=source_id,
-                                    external_id=payload.external_id,
-                                    source_url=payload.source_url,
-                                    retrieved_at=datetime.now(UTC),
-                                    published_at=payload.published_at,
-                                    content_type=payload.content_type,
-                                    object_store_uri=uri,
-                                    content_hash=content_hash,
-                                    connector_version=connector.connector_version,
-                                    metadata_=payload.metadata,
-                                )
-                            )
-                            await session.commit()
-                            envelope = connector.build_envelope(payload, uri, ingestion_id)
-                        else:
-                            # Preserve immutable raw-object provenance for existing ingestions.
-                            envelope = {
-                                "ingestion_id": str(existing.ingestion_id),
-                                "source_id": existing.source_id,
-                                "external_id": existing.external_id,
-                                "source_url": existing.source_url,
-                                "retrieved_at": existing.retrieved_at.isoformat(),
-                                "published_at": existing.published_at.isoformat()
-                                if existing.published_at
-                                else None,
-                                "content_type": existing.content_type,
-                                "object_store_uri": existing.object_store_uri,
-                                "content_hash": existing.content_hash,
-                                "connector_version": existing.connector_version,
-                                "metadata": existing.metadata_ or {},
-                            }
+                        )
+                        await session.commit()
+                        envelope = connector.build_envelope(payload, uri, ingestion_id)
+                        envelope["tenant_id"] = settings.default_tenant_id
 
                     message = wrap_payload(
                         envelope,

@@ -28,12 +28,18 @@ async def _deliver_with_retries(
     for attempt in range(1, MAX_DELIVERY_RETRIES + 1):
         try:
             if channel == "webhook":
+                webhook_url = task.get("webhook_url")
+                if not webhook_url:
+                    return False, "missing webhook_url in alert delivery config"
                 success = await deliver_webhook(
-                    task.get("webhook_url", "http://localhost:9999/webhook"),
+                    webhook_url,
                     delivery_payload,
                 )
             elif channel == "email":
-                success = await deliver_email("analyst@example.com", delivery_payload)
+                email_to = task.get("email")
+                if not email_to:
+                    return False, "missing email recipient in alert delivery config"
+                success = await deliver_email(email_to, delivery_payload)
             else:
                 success = True
 

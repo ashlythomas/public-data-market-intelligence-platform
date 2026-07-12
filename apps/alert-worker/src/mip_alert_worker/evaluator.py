@@ -62,10 +62,14 @@ async def evaluate_alert_candidate(payload: dict[str, Any]) -> list[dict[str, An
                 continue
 
             for channel in rule.delivery_channels:
+                config = rule.delivery_config or {}
+                channel_config = config.get(channel, {}) if isinstance(config, dict) else {}
                 deliveries.append(
                     {
                         "alert_id": str(rule.alert_id),
                         "channel": channel,
+                        "email": channel_config.get("to"),
+                        "webhook_url": channel_config.get("url"),
                         "delivery_payload": {
                             "subject": f"Signal alert: {signal_type}",
                             "signal_type": signal_type,

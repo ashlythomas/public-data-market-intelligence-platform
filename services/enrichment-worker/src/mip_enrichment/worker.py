@@ -50,6 +50,7 @@ async def process_enrichment_message(
 ) -> None:
     payload = message.get("payload", message)
     document_id = uuid.UUID(payload["document_id"])
+    tenant_id = payload.get("tenant_id")
     body = payload.get("body", "")
     source_url = payload.get("canonical_url", "")
 
@@ -144,7 +145,7 @@ async def process_enrichment_message(
         await session.commit()
 
     entity_msg = wrap_payload(
-        {"document_id": str(document_id), "entities": entities_data},
+        {"document_id": str(document_id), "tenant_id": tenant_id, "entities": entities_data},
         event_type="entities.extracted",
         producer="enrichment-worker",
         producer_version="0.1.0",
@@ -153,7 +154,11 @@ async def process_enrichment_message(
 
     if events_data:
         event_msg = wrap_payload(
-            {"document_id": str(document_id), "events": events_data},
+            {
+                "document_id": str(document_id),
+                "tenant_id": tenant_id,
+                "events": events_data,
+            },
             event_type="events.extracted",
             producer="enrichment-worker",
             producer_version="0.1.0",
@@ -163,6 +168,7 @@ async def process_enrichment_message(
     embed_msg = wrap_payload(
         {
             "document_id": str(document_id),
+            "tenant_id": tenant_id,
             "embedding": embed_response.embeddings[0],
             "model_version": embed_response.model_version,
             "sentiment": sentiment,

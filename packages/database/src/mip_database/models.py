@@ -362,6 +362,7 @@ class AlertRule(Base, TimestampMixin):
     minimum_score: Mapped[float] = mapped_column(Float, default=0.5)
     countries: Mapped[list] = mapped_column(JSONB, default=list)
     delivery_channels: Mapped[list] = mapped_column(JSONB, default=list)
+    delivery_config: Mapped[dict] = mapped_column(JSONB, default=dict)
     cooldown_period_seconds: Mapped[int] = mapped_column(Integer, default=3600)
     active: Mapped[bool] = mapped_column(Boolean, default=True)
 
