@@ -228,7 +228,11 @@ class SearchService:
             start_index = (page - 1) * page_size
             end_index = start_index + page_size
             elapsed_ms = (time.monotonic() - start) * 1000
-            return combined[start_index:end_index], doc_total + event_total + narrative_total, elapsed_ms
+            return (
+                combined[start_index:end_index],
+                doc_total + event_total + narrative_total,
+                elapsed_ms,
+            )
 
         doc_results, doc_total = await asyncio.to_thread(
             self._keyword_search,
@@ -265,7 +269,11 @@ class SearchService:
         start_index = (page - 1) * page_size
         end_index = start_index + page_size
         elapsed_ms = (time.monotonic() - start) * 1000
-        return combined[start_index:end_index], doc_total + event_total + narrative_total, elapsed_ms
+        return (
+            combined[start_index:end_index],
+            doc_total + event_total + narrative_total,
+            elapsed_ms,
+        )
 
     async def close(self) -> None:
         pass
