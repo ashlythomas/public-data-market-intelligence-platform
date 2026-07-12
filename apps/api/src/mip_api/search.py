@@ -129,20 +129,41 @@ class SearchService:
             if "highlight" in hit:
                 highlights = hit["highlight"]
                 snippet = highlights.get("body", highlights.get("title", [None]))[0]
+
+            if result_type == "event":
+                item_id = source.get("event_id", hit["_id"])
+                title = source.get("title") or source.get("action") or source.get("event_type")
+                provenance = {
+                    "source_id": source.get("source_id"),
+                    "event_id": source.get("event_id"),
+                    "document_id": source.get("document_id"),
+                }
+            elif result_type == "narrative":
+                item_id = source.get("narrative_id", hit["_id"])
+                title = source.get("title") or source.get("description")
+                provenance = {
+                    "source_id": source.get("source_id"),
+                    "narrative_id": source.get("narrative_id"),
+                }
+            else:
+                item_id = source.get("document_id", hit["_id"])
+                title = source.get("title")
+                provenance = {
+                    "source_id": source.get("source_id"),
+                    "document_id": source.get("document_id"),
+                    "content_hash": source.get("content_hash"),
+                }
+
             results.append(
                 {
-                    "id": source.get("document_id", hit["_id"]),
+                    "id": item_id,
                     "type": result_type,
-                    "title": source.get("title"),
+                    "title": title,
                     "snippet": snippet or source.get("summary", "")[:200],
                     "score": hit["_score"],
                     "source_id": source.get("source_id"),
                     "published_at": source.get("published_at"),
-                    "provenance": {
-                        "source_id": source.get("source_id"),
-                        "document_id": source.get("document_id"),
-                        "content_hash": source.get("content_hash"),
-                    },
+                    "provenance": provenance,
                 }
             )
         return results, total

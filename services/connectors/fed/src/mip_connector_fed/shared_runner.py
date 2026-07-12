@@ -25,6 +25,7 @@ async def run_connector(
     *,
     source_id: str,
     kafka_topic: str,
+    tenant_id: str,
 ) -> dict:
     setup_logging()
     settings = get_settings()
@@ -104,7 +105,7 @@ async def run_connector(
                         )
                         await session.commit()
                         envelope = connector.build_envelope(payload, uri, ingestion_id)
-                        envelope["tenant_id"] = settings.default_tenant_id
+                        envelope["tenant_id"] = tenant_id
 
                     message = wrap_payload(
                         envelope,

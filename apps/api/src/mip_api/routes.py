@@ -47,6 +47,14 @@ class AlertCreateRequest(BaseModel):
     cooldown_period_seconds: int = Field(default=3600, ge=0)
 
 
+class AlertUpdateRequest(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=255)
+    active: bool | None = None
+    delivery_channels: list[str] | None = None
+    delivery_config: dict[str, Any] | None = None
+    cooldown_period_seconds: int | None = Field(default=None, ge=0)
+
+
 def _error(code: str, message: str, request: Request, details: dict | None = None) -> HTTPException:
     return HTTPException(
         status_code=404 if "NOT_FOUND" in code else 400,
@@ -550,7 +558,7 @@ async def list_alerts(
 @router.patch("/alerts/{alert_id}")
 async def update_alert(
     alert_id: UUID,
-    body: dict[str, Any],
+    body: AlertUpdateRequest,
     request: Request,
     session: AsyncSession = Depends(get_db),
     auth: AuthContext = Depends(require_role("admin", "analyst")),
@@ -559,10 +567,17 @@ async def update_alert(
     alert = await repo.get_by_id(alert_id)
     if not alert or alert.tenant_id != auth.tenant_id:
         raise _error("ALERT_NOT_FOUND", "The requested alert does not exist.", request)
-    if "active" in body:
-        alert.active = body["active"]
-    if "name" in body:
-        alert.name = body["name"]
+    payload = body.model_dump(exclude_none=True)
+    if "active" in payload:
+        alert.active = payload["active"]
+    if "name" in payload:
+        alert.name = payload["name"]
+    if "delivery_channels" in payload:
+        alert.delivery_channels = payload["delivery_channels"]
+    if "delivery_config" in payload:
+        alert.delivery_config = payload["delivery_config"]
+    if "cooldown_period_seconds" in payload:
+        alert.cooldown_period_seconds = payload["cooldown_period_seconds"]
     updated = await repo.update(alert)
     await audit_action(
         session,
@@ -571,7 +586,7 @@ async def update_alert(
         action="alert.update",
         resource_type="alert_rule",
         resource_id=str(updated.alert_id),
-        details=body,
+        details=payload,
     )
     return {"alert_id": str(updated.alert_id), "name": updated.name, "active": updated.active}
 
