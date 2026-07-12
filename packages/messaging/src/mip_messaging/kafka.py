@@ -74,7 +74,9 @@ class KafkaProducer:
             extra={"topic": topic, "message_id": str(payload.get("message_id", ""))},
         )
 
-    async def publish_dlq(self, dlq_topic: str, original_message: dict[str, Any], error: str) -> None:
+    async def publish_dlq(
+        self, dlq_topic: str, original_message: dict[str, Any], error: str
+    ) -> None:
         dlq_payload = {
             "original_message": original_message,
             "error": error,

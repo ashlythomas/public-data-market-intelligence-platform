@@ -46,8 +46,12 @@ class Source(Base, TimestampMixin):
 class IngestionRun(Base):
     __tablename__ = "ingestion_runs"
 
-    run_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    source_id: Mapped[str] = mapped_column(String(64), ForeignKey("sources.source_id"), nullable=False)
+    run_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    source_id: Mapped[str] = mapped_column(
+        String(64), ForeignKey("sources.source_id"), nullable=False
+    )
     started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     status: Mapped[str] = mapped_column(String(32), default="running")
@@ -61,7 +65,9 @@ class RawDocument(Base):
     __tablename__ = "raw_documents"
 
     ingestion_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
-    source_id: Mapped[str] = mapped_column(String(64), ForeignKey("sources.source_id"), nullable=False)
+    source_id: Mapped[str] = mapped_column(
+        String(64), ForeignKey("sources.source_id"), nullable=False
+    )
     external_id: Mapped[str | None] = mapped_column(String(255))
     source_url: Mapped[str] = mapped_column(String(2048), nullable=False)
     retrieved_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
@@ -76,8 +82,12 @@ class RawDocument(Base):
 class CanonicalDocument(Base, TimestampMixin):
     __tablename__ = "canonical_documents"
 
-    document_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    source_id: Mapped[str] = mapped_column(String(64), ForeignKey("sources.source_id"), nullable=False)
+    document_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    source_id: Mapped[str] = mapped_column(
+        String(64), ForeignKey("sources.source_id"), nullable=False
+    )
     external_id: Mapped[str | None] = mapped_column(String(255))
     canonical_url: Mapped[str] = mapped_column(String(2048), nullable=False)
     title: Mapped[str | None] = mapped_column(String(1024))
@@ -112,7 +122,9 @@ class DocumentDuplicate(Base):
 class Entity(Base, TimestampMixin):
     __tablename__ = "entities"
 
-    entity_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    entity_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
     canonical_name: Mapped[str] = mapped_column(String(512), nullable=False, index=True)
     entity_type: Mapped[str] = mapped_column(String(64), nullable=False)
     country_codes: Mapped[list] = mapped_column(JSONB, default=list)
@@ -133,7 +145,9 @@ class EntityAlias(Base):
 class EntityMention(Base):
     __tablename__ = "entity_mentions"
 
-    mention_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    mention_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
     document_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("canonical_documents.document_id"), nullable=False
     )
@@ -152,7 +166,9 @@ class EntityMention(Base):
 class Event(Base, TimestampMixin):
     __tablename__ = "events"
 
-    event_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    event_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
     document_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("canonical_documents.document_id"), nullable=False
     )
@@ -171,7 +187,9 @@ class Event(Base, TimestampMixin):
 class EvidenceSpan(Base):
     __tablename__ = "evidence_spans"
 
-    evidence_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    evidence_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
     document_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("canonical_documents.document_id"), nullable=False
     )
@@ -197,7 +215,9 @@ class EventEvidence(Base):
 class Narrative(Base, TimestampMixin):
     __tablename__ = "narratives"
 
-    narrative_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    narrative_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
     title: Mapped[str] = mapped_column(String(512), nullable=False)
     description: Mapped[str] = mapped_column(Text, nullable=False)
     lifecycle_state: Mapped[str] = mapped_column(String(32), nullable=False)
@@ -226,9 +246,13 @@ class NarrativeEvent(Base):
 class Signal(Base):
     __tablename__ = "signals"
 
-    signal_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    signal_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
     signal_type: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
-    entity_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("entities.entity_id"))
+    entity_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("entities.entity_id")
+    )
     asset_id: Mapped[str | None] = mapped_column(String(64))
     direction: Mapped[str] = mapped_column(String(16), nullable=False)
     score: Mapped[float] = mapped_column(Float, nullable=False)
@@ -254,7 +278,9 @@ class SignalEvidence(Base):
 class Tenant(Base, TimestampMixin):
     __tablename__ = "tenants"
 
-    tenant_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     active: Mapped[bool] = mapped_column(Boolean, default=True)
 
@@ -262,7 +288,9 @@ class Tenant(Base, TimestampMixin):
 class User(Base, TimestampMixin):
     __tablename__ = "users"
 
-    user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
     tenant_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("tenants.tenant_id"), nullable=False
     )
@@ -274,7 +302,9 @@ class User(Base, TimestampMixin):
 class ApiKey(Base, TimestampMixin):
     __tablename__ = "api_keys"
 
-    key_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    key_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
     tenant_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("tenants.tenant_id"), nullable=False
     )
@@ -288,7 +318,9 @@ class ApiKey(Base, TimestampMixin):
 class AlertRule(Base, TimestampMixin):
     __tablename__ = "alert_rules"
 
-    alert_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    alert_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
     tenant_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("tenants.tenant_id"), nullable=False
     )
@@ -311,7 +343,9 @@ class AlertRule(Base, TimestampMixin):
 class AlertDelivery(Base):
     __tablename__ = "alert_deliveries"
 
-    delivery_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    delivery_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
     alert_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("alert_rules.alert_id"), nullable=False
     )
@@ -328,14 +362,18 @@ class ModelVersion(Base):
     version_id: Mapped[str] = mapped_column(String(64), primary_key=True)
     model_name: Mapped[str] = mapped_column(String(128), nullable=False)
     provider: Mapped[str] = mapped_column(String(64), nullable=False)
-    deployed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    deployed_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
     metadata_: Mapped[dict] = mapped_column("metadata", JSONB, default=dict)
 
 
 class AuditLog(Base):
     __tablename__ = "audit_log"
 
-    audit_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    audit_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
     tenant_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
     user_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
     action: Mapped[str] = mapped_column(String(128), nullable=False)

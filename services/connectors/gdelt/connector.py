@@ -2,6 +2,7 @@
 
 from mip_connector_fed.base import BaseConnector
 
+
 class GdeltConnector(BaseConnector):
     connector_name = "gdelt"
     connector_version = "0.1.0"

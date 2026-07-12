@@ -162,7 +162,9 @@ async def list_events(
         }
         for e in events
     ]
-    return PaginatedResponse(items=items, total=total, page=page, page_size=page_size, has_more=page * page_size < total)
+    return PaginatedResponse(
+        items=items, total=total, page=page, page_size=page_size, has_more=page * page_size < total
+    )
 
 
 @router.get("/events/{event_id}")
@@ -199,7 +201,9 @@ async def list_entities(
     tenant_id: UUID = Depends(get_tenant_id),
 ) -> PaginatedResponse[dict[str, Any]]:
     repo = EntityRepository(session)
-    entities, total = await repo.list_entities(page=page, page_size=page_size, entity_type=entity_type)
+    entities, total = await repo.list_entities(
+        page=page, page_size=page_size, entity_type=entity_type
+    )
     items = [
         {
             "entity_id": str(e.entity_id),
@@ -209,7 +213,9 @@ async def list_entities(
         }
         for e in entities
     ]
-    return PaginatedResponse(items=items, total=total, page=page, page_size=page_size, has_more=page * page_size < total)
+    return PaginatedResponse(
+        items=items, total=total, page=page, page_size=page_size, has_more=page * page_size < total
+    )
 
 
 @router.get("/entities/{entity_id}")
@@ -253,7 +259,9 @@ async def list_narratives(
         }
         for n in narratives
     ]
-    return PaginatedResponse(items=items, total=total, page=page, page_size=page_size, has_more=page * page_size < total)
+    return PaginatedResponse(
+        items=items, total=total, page=page, page_size=page_size, has_more=page * page_size < total
+    )
 
 
 @router.get("/narratives/{narrative_id}")
@@ -292,7 +300,9 @@ async def list_signals(
     tenant_id: UUID = Depends(get_tenant_id),
 ) -> PaginatedResponse[dict[str, Any]]:
     repo = SignalRepository(session)
-    signals, total = await repo.list_signals(page=page, page_size=page_size, signal_type=signal_type)
+    signals, total = await repo.list_signals(
+        page=page, page_size=page_size, signal_type=signal_type
+    )
     items = [
         {
             "signal_id": str(s.signal_id),
@@ -306,7 +316,9 @@ async def list_signals(
         }
         for s in signals
     ]
-    return PaginatedResponse(items=items, total=total, page=page, page_size=page_size, has_more=page * page_size < total)
+    return PaginatedResponse(
+        items=items, total=total, page=page, page_size=page_size, has_more=page * page_size < total
+    )
 
 
 @router.get("/signals/{signal_id}")

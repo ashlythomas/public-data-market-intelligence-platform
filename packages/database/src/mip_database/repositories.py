@@ -210,9 +210,7 @@ class AlertRepository:
         self.session = session
 
     async def get_by_id(self, alert_id: uuid.UUID) -> AlertRule | None:
-        result = await self.session.execute(
-            select(AlertRule).where(AlertRule.alert_id == alert_id)
-        )
+        result = await self.session.execute(select(AlertRule).where(AlertRule.alert_id == alert_id))
         return result.scalar_one_or_none()
 
     async def list_by_tenant(self, tenant_id: uuid.UUID) -> list[AlertRule]:

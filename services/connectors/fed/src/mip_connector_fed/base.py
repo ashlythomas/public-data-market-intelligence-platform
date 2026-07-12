@@ -69,12 +69,12 @@ class BaseConnector(ABC):
         return self._checkpoint.copy()
 
     @abstractmethod
-    async def discover(self, checkpoint: dict[str, Any] | None = None) -> AsyncIterator[SourceItem]:
-        ...
+    async def discover(
+        self, checkpoint: dict[str, Any] | None = None
+    ) -> AsyncIterator[SourceItem]: ...
 
     @abstractmethod
-    async def fetch(self, item: SourceItem) -> RawPayload:
-        ...
+    async def fetch(self, item: SourceItem) -> RawPayload: ...
 
     async def fetch_with_retry(self, item: SourceItem) -> RawPayload:
         last_error: Exception | None = None
