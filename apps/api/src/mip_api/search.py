@@ -85,6 +85,8 @@ class SearchService:
         filters: dict[str, Any],
         page: int,
         page_size: int,
+        index: str = DOCUMENTS_INDEX,
+        result_type: str = "document",
     ) -> tuple[list[dict[str, Any]], int]:
         must_clauses: list[dict[str, Any]] = [
             {
@@ -117,7 +119,7 @@ class SearchService:
                 }
             },
         }
-        response = self.client.search(index=DOCUMENTS_INDEX, body=body)
+        response = self.client.search(index=index, body=body)
         hits = response["hits"]["hits"]
         total = response["hits"]["total"]["value"]
         results = []
@@ -130,7 +132,7 @@ class SearchService:
             results.append(
                 {
                     "id": source.get("document_id", hit["_id"]),
-                    "type": "document",
+                    "type": result_type,
                     "title": source.get("title"),
                     "snippet": snippet or source.get("summary", "")[:200],
                     "score": hit["_score"],
@@ -186,21 +188,84 @@ class SearchService:
     ) -> tuple[list[dict[str, Any]], int, float]:
         start = time.monotonic()
         filters = filters or {}
+        fetch_size = page * page_size
 
         if hybrid:
-            keyword_results, total = await asyncio.to_thread(
-                self._keyword_search, query, filters=filters, page=page, page_size=page_size
+            keyword_results, doc_total = await asyncio.to_thread(
+                self._keyword_search,
+                query,
+                filters=filters,
+                page=1,
+                page_size=fetch_size,
+                index=DOCUMENTS_INDEX,
+                result_type="document",
             )
-            semantic_results = await asyncio.to_thread(self._semantic_search, query, page_size)
-            fused = _reciprocal_rank_fusion(keyword_results, semantic_results)
+            semantic_results = await asyncio.to_thread(self._semantic_search, query, fetch_size)
+            fused_docs = _reciprocal_rank_fusion(keyword_results, semantic_results)
+            event_results, event_total = await asyncio.to_thread(
+                self._keyword_search,
+                query,
+                filters=filters,
+                page=1,
+                page_size=fetch_size,
+                index=EVENTS_INDEX,
+                result_type="event",
+            )
+            narrative_results, narrative_total = await asyncio.to_thread(
+                self._keyword_search,
+                query,
+                filters=filters,
+                page=1,
+                page_size=fetch_size,
+                index=NARRATIVES_INDEX,
+                result_type="narrative",
+            )
+            combined = sorted(
+                [*fused_docs, *event_results, *narrative_results],
+                key=lambda item: float(item.get("score", 0.0)),
+                reverse=True,
+            )
+            start_index = (page - 1) * page_size
+            end_index = start_index + page_size
             elapsed_ms = (time.monotonic() - start) * 1000
-            return fused[:page_size], total, elapsed_ms
+            return combined[start_index:end_index], doc_total + event_total + narrative_total, elapsed_ms
 
-        results, total = await asyncio.to_thread(
-            self._keyword_search, query, filters=filters, page=page, page_size=page_size
+        doc_results, doc_total = await asyncio.to_thread(
+            self._keyword_search,
+            query,
+            filters=filters,
+            page=1,
+            page_size=fetch_size,
+            index=DOCUMENTS_INDEX,
+            result_type="document",
         )
+        event_results, event_total = await asyncio.to_thread(
+            self._keyword_search,
+            query,
+            filters=filters,
+            page=1,
+            page_size=fetch_size,
+            index=EVENTS_INDEX,
+            result_type="event",
+        )
+        narrative_results, narrative_total = await asyncio.to_thread(
+            self._keyword_search,
+            query,
+            filters=filters,
+            page=1,
+            page_size=fetch_size,
+            index=NARRATIVES_INDEX,
+            result_type="narrative",
+        )
+        combined = sorted(
+            [*doc_results, *event_results, *narrative_results],
+            key=lambda item: float(item.get("score", 0.0)),
+            reverse=True,
+        )
+        start_index = (page - 1) * page_size
+        end_index = start_index + page_size
         elapsed_ms = (time.monotonic() - start) * 1000
-        return results, total, elapsed_ms
+        return combined[start_index:end_index], doc_total + event_total + narrative_total, elapsed_ms
 
     async def close(self) -> None:
         pass

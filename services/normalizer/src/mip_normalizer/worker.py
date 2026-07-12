@@ -7,7 +7,7 @@ from datetime import datetime
 from typing import Any
 
 from mip_database.config import get_settings
-from mip_database.models import CanonicalDocument
+from mip_database.models import CanonicalDocument, DocumentDuplicate
 from mip_database.repositories import DocumentRepository
 from mip_database.session import async_session_factory
 from mip_database.storage import ObjectStorage
@@ -103,9 +103,44 @@ async def process_raw_message(
         doc_repo = DocumentRepository(session)
 
         existing_by_id = await doc_repo.get_by_ingestion_id(document_id)
+        if existing_by_id is not None and not existing_by_id.is_canonical:
+            DOCUMENT_THROUGHPUT.labels(service="normalizer", status="duplicate").inc()
+            return
         if existing_by_id is None:
             existing = await doc_repo.get_by_content_hash(normalized["content_hash"])
             if existing:
+                published_at = None
+                if normalized.get("published_at"):
+                    published_at = datetime.fromisoformat(normalized["published_at"])
+                duplicate_doc = CanonicalDocument(
+                    document_id=document_id,
+                    source_id=normalized["source_id"],
+                    external_id=normalized.get("external_id"),
+                    canonical_url=normalized["canonical_url"],
+                    title=normalized.get("title"),
+                    body=normalized["body"],
+                    summary=normalized.get("summary"),
+                    language=normalized.get("language", "en"),
+                    published_at=published_at,
+                    retrieved_at=datetime.fromisoformat(normalized["retrieved_at"]),
+                    document_type=normalized.get("document_type", "article"),
+                    country_codes=normalized.get("country_codes", []),
+                    topic_labels=normalized.get("topic_labels", []),
+                    content_hash=normalized["content_hash"],
+                    parser_version=normalized["parser_version"],
+                    source_record_id=normalized["source_record_id"],
+                    is_canonical=False,
+                )
+                await doc_repo.create(duplicate_doc)
+                session.add(
+                    DocumentDuplicate(
+                        canonical_document_id=existing.document_id,
+                        duplicate_document_id=document_id,
+                        method="exact_hash",
+                        score=1.0,
+                    )
+                )
+                await session.commit()
                 DOCUMENT_THROUGHPUT.labels(service="normalizer", status="duplicate").inc()
                 return
 

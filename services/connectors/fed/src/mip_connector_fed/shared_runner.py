@@ -96,10 +96,25 @@ async def run_connector(
                                 )
                             )
                             await session.commit()
+                            envelope = connector.build_envelope(payload, uri, ingestion_id)
                         else:
-                            uri = existing.object_store_uri
+                            # Preserve immutable raw-object provenance for existing ingestions.
+                            envelope = {
+                                "ingestion_id": str(existing.ingestion_id),
+                                "source_id": existing.source_id,
+                                "external_id": existing.external_id,
+                                "source_url": existing.source_url,
+                                "retrieved_at": existing.retrieved_at.isoformat(),
+                                "published_at": existing.published_at.isoformat()
+                                if existing.published_at
+                                else None,
+                                "content_type": existing.content_type,
+                                "object_store_uri": existing.object_store_uri,
+                                "content_hash": existing.content_hash,
+                                "connector_version": existing.connector_version,
+                                "metadata": existing.metadata_ or {},
+                            }
 
-                    envelope = connector.build_envelope(payload, uri, ingestion_id)
                     message = wrap_payload(
                         envelope,
                         event_type="raw.document.ingested",

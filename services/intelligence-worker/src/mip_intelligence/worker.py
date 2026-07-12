@@ -20,6 +20,7 @@ logger = logging.getLogger(__name__)
 async def process_events_message(message: dict[str, Any], producer: KafkaProducer) -> None:
     payload = message.get("payload", message)
     settings = get_settings()
+    tenant_id = str(payload.get("tenant_id") or settings.default_tenant_id)
     events_data = payload.get("events", [])
     document_id = payload.get("document_id")
 
@@ -72,7 +73,7 @@ async def process_events_message(message: dict[str, Any], producer: KafkaProduce
                     "confidence": signal.confidence,
                     "narrative_id": str(narrative.narrative_id),
                     "document_id": document_id,
-                    "tenant_id": settings.default_tenant_id,
+                    "tenant_id": tenant_id,
                 },
                 event_type="signal.generated",
                 producer="intelligence-worker",
@@ -87,7 +88,7 @@ async def process_events_message(message: dict[str, Any], producer: KafkaProduce
                     "score": signal.score,
                     "confidence": signal.confidence,
                     "narrative_id": str(narrative.narrative_id),
-                    "tenant_id": settings.default_tenant_id,
+                    "tenant_id": tenant_id,
                     "event_type": event.event_type,
                     "topic_labels": topic_labels,
                     "entity_ids": [],

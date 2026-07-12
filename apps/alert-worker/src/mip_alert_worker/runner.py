@@ -16,6 +16,38 @@ from mip_messaging import KafkaConsumer, KafkaProducer
 from mip_observability import setup_logging
 
 logger = logging.getLogger(__name__)
+MAX_DELIVERY_RETRIES = 3
+
+
+async def _deliver_with_retries(
+    channel: str,
+    task: dict[str, Any],
+    delivery_payload: dict[str, Any],
+) -> tuple[bool, str | None]:
+    last_error: str | None = None
+    for attempt in range(1, MAX_DELIVERY_RETRIES + 1):
+        try:
+            if channel == "webhook":
+                success = await deliver_webhook(
+                    task.get("webhook_url", "http://localhost:9999/webhook"),
+                    delivery_payload,
+                )
+            elif channel == "email":
+                success = await deliver_email("analyst@example.com", delivery_payload)
+            else:
+                success = True
+
+            if success:
+                return True, None
+            last_error = f"{channel} delivery returned unsuccessful status"
+        except Exception as exc:  # pragma: no cover - defensive retry path
+            last_error = str(exc)
+            logger.exception("Delivery failed", extra={"channel": channel, "attempt": attempt})
+
+        if attempt < MAX_DELIVERY_RETRIES:
+            await asyncio.sleep(attempt)
+
+    return False, last_error
 
 
 async def process_alert_message(message: dict[str, Any]) -> None:
@@ -29,21 +61,7 @@ async def process_alert_message(message: dict[str, Any]) -> None:
         signal_id = str(delivery_payload.get("signal_id", "unknown"))
         if await delivery_was_successful(alert_id, channel, signal_id):
             continue
-        success = False
-        error = None
-        try:
-            if channel == "webhook":
-                success = await deliver_webhook(
-                    task.get("webhook_url", "http://localhost:9999/webhook"),
-                    delivery_payload,
-                )
-            elif channel == "email":
-                success = await deliver_email("analyst@example.com", delivery_payload)
-            else:
-                success = True
-        except Exception as e:
-            error = str(e)
-            logger.exception("Delivery failed")
+        success, error = await _deliver_with_retries(channel, task, delivery_payload)
 
         await record_delivery(
             alert_id,
@@ -52,6 +70,8 @@ async def process_alert_message(message: dict[str, Any]) -> None:
             delivery_payload,
             error,
         )
+        if not success:
+            raise RuntimeError(error or "alert delivery failed")
 
 
 async def run_alert_worker() -> None:
