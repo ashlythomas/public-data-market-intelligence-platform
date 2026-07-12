@@ -1,5 +1,7 @@
 """Unit tests for document normalization."""
 
+import uuid
+
 from mip_normalizer.parser import (
     detect_language,
     extract_html,
@@ -57,3 +59,34 @@ def test_normalize_document_rejects_empty():
     }
     result = normalize_document(raw_envelope=envelope, content=b"short")
     assert result is None
+
+
+def test_normalize_document_uses_ingestion_id():
+    ingestion_id = uuid.uuid4()
+    envelope = {
+        "ingestion_id": str(ingestion_id),
+        "source_id": "fed",
+        "source_url": "https://fed.gov/test",
+        "content_type": "text/html",
+        "content_hash": "abc123",
+        "retrieved_at": "2024-01-01T00:00:00Z",
+        "metadata": {},
+    }
+    result = normalize_document(raw_envelope=envelope, content=FED_PRESS_RELEASE_HTML.encode())
+    assert result is not None
+    assert result["document_id"] == str(ingestion_id)
+
+
+def test_normalize_document_idempotent_without_ingestion_id():
+    envelope = {
+        "source_id": "fed",
+        "source_url": "https://fed.gov/test",
+        "content_type": "text/html",
+        "content_hash": "stable-hash",
+        "retrieved_at": "2024-01-01T00:00:00Z",
+        "metadata": {},
+    }
+    first = normalize_document(raw_envelope=envelope, content=FED_PRESS_RELEASE_HTML.encode())
+    second = normalize_document(raw_envelope=envelope, content=FED_PRESS_RELEASE_HTML.encode())
+    assert first is not None and second is not None
+    assert first["document_id"] == second["document_id"]

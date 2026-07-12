@@ -7,6 +7,7 @@ from typing import Any
 
 from mip_database.config import get_settings
 from mip_database.models import Event, EventEvidence, EvidenceSpan
+from mip_database.repositories import SentimentRepository
 from mip_database.session import async_session_factory
 from mip_intelligence.engine import generate_signal_for_event, update_narrative
 from mip_messaging import KafkaConsumer, KafkaProducer, wrap_payload
@@ -22,6 +23,14 @@ async def process_events_message(message: dict[str, Any], producer: KafkaProduce
     document_id = payload.get("document_id")
 
     async with async_session_factory() as session:
+        sentiment_score = 0.0
+        if document_id:
+            sentiment_repo = SentimentRepository(session)
+            sentiment_record = await sentiment_repo.get_by_document(uuid.UUID(document_id))
+            if sentiment_record:
+                scores = sentiment_record.scores or {}
+                sentiment_score = float(scores.get("hawkish_dovish", 0.0))
+
         for evt_data in events_data:
             event_id = uuid.UUID(evt_data["event_id"])
             result = await session.execute(select(Event).where(Event.event_id == event_id))
@@ -32,7 +41,9 @@ async def process_events_message(message: dict[str, Any], producer: KafkaProduce
             topic_labels = (
                 [event.event_type.split("_")[0]] if "_" in event.event_type else [event.event_type]
             )
-            narrative = await update_narrative(session, event, topic_labels)
+            narrative = await update_narrative(
+                session, event, topic_labels, sentiment_score=sentiment_score
+            )
 
             ev_result = await session.execute(
                 select(EvidenceSpan.evidence_id)
@@ -43,7 +54,13 @@ async def process_events_message(message: dict[str, Any], producer: KafkaProduce
             if not evidence_ids:
                 continue
 
-            signal = await generate_signal_for_event(session, event, narrative, evidence_ids)
+            signal = await generate_signal_for_event(
+                session,
+                event,
+                narrative,
+                evidence_ids,
+                sentiment_score=sentiment_score,
+            )
             await session.commit()
 
             signal_msg = wrap_payload(

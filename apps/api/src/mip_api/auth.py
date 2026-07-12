@@ -2,19 +2,20 @@
 
 import hashlib
 import uuid
-from typing import Annotated
+from dataclasses import dataclass
 
 from fastapi import Depends, Header, HTTPException, Request
 from mip_api.config import get_settings
+from mip_api.deps import get_db
 from mip_database.models import ApiKey, AuditLog
-from mip_database.session import async_session_factory
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 
-async def get_db_session() -> AsyncSession:
-    async with async_session_factory() as session:
-        yield session
+@dataclass(frozen=True)
+class AuthContext:
+    tenant_id: uuid.UUID
+    role: str
 
 
 def hash_api_key(key: str) -> str:
@@ -23,10 +24,10 @@ def hash_api_key(key: str) -> str:
 
 async def authenticate_request(
     request: Request,
-    x_api_key: Annotated[str | None, Header()] = None,
-    x_tenant_id: Annotated[str | None, Header()] = None,
-    session: AsyncSession = Depends(get_db_session),
-) -> tuple[uuid.UUID, str]:
+    session: AsyncSession = Depends(get_db),
+    x_api_key: str | None = Header(default=None, alias="X-Api-Key"),
+) -> AuthContext:
+    """Authenticate via API key. In development, fall back to default tenant."""
     settings = get_settings()
 
     if x_api_key:
@@ -37,12 +38,31 @@ async def authenticate_request(
         api_key = result.scalar_one_or_none()
         if not api_key:
             raise HTTPException(status_code=401, detail="Invalid API key")
-        return api_key.tenant_id, api_key.role
+        request.state.tenant_id = str(api_key.tenant_id)
+        request.state.role = api_key.role
+        return AuthContext(tenant_id=api_key.tenant_id, role=api_key.role)
 
-    if x_tenant_id:
-        return uuid.UUID(x_tenant_id), "viewer"
+    if settings.app_env == "development":
+        tenant_id = uuid.UUID(settings.default_tenant_id)
+        request.state.tenant_id = str(tenant_id)
+        request.state.role = "analyst"
+        return AuthContext(tenant_id=tenant_id, role="analyst")
 
-    return uuid.UUID(settings.default_tenant_id), "viewer"
+    raise HTTPException(
+        status_code=401,
+        detail="API key required. Pass X-Api-Key header.",
+    )
+
+
+def require_role(*allowed_roles: str):
+    """Dependency factory to enforce role-based access."""
+
+    async def _check(auth: AuthContext = Depends(authenticate_request)) -> AuthContext:
+        if auth.role not in allowed_roles and auth.role != "admin":
+            raise HTTPException(status_code=403, detail="Insufficient permissions")
+        return auth
+
+    return _check
 
 
 async def audit_action(

@@ -3,10 +3,11 @@ from typing import Any
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from mip_api.auth import AuthContext, audit_action, authenticate_request, require_role
 from mip_api.config import get_settings
-from mip_api.deps import get_db, get_search_service, get_tenant_id
+from mip_api.deps import get_db, get_search_service
 from mip_api.search import SearchService
-from mip_database.models import AlertRule
+from mip_database.models import AlertRule, Source
 from mip_database.repositories import (
     AlertRepository,
     DocumentRepository,
@@ -45,6 +46,32 @@ def _error(code: str, message: str, request: Request, details: dict | None = Non
     )
 
 
+def _policy_from_source(source: Source | None) -> LicencePolicy:
+    if source is None:
+        return LicencePolicy(
+            licence_type="public_domain",
+            redistribution_allowed=True,
+            commercial_use_allowed=True,
+        )
+    return LicencePolicy(
+        licence_type=source.licence_type,
+        redistribution_allowed=source.redistribution_allowed,
+        commercial_use_allowed=source.commercial_use_allowed,
+        attribution_required=source.licence_type == "attribution_required",
+    )
+
+
+def _filter_snippet(snippet: str | None, policy: LicencePolicy) -> str | None:
+    if not snippet:
+        return snippet
+    if not policy.redistribution_allowed:
+        if policy.quotation_allowed:
+            limit = policy.quotation_limit or 200
+            return snippet[:limit]
+        return None
+    return snippet
+
+
 @router.get("/documents")
 async def list_documents(
     request: Request,
@@ -52,17 +79,15 @@ async def list_documents(
     page_size: int = Query(20, ge=1, le=100),
     source_id: str | None = None,
     session: AsyncSession = Depends(get_db),
-    tenant_id: UUID = Depends(get_tenant_id),
+    auth: AuthContext = Depends(authenticate_request),
 ) -> PaginatedResponse[dict[str, Any]]:
     repo = DocumentRepository(session)
+    source_repo = SourceRepository(session)
     docs, total = await repo.list_documents(page=page, page_size=page_size, source_id=source_id)
+    sources = await source_repo.get_by_ids(list({doc.source_id for doc in docs}))
     items = []
     for doc in docs:
-        policy = LicencePolicy(
-            licence_type="public_domain",
-            redistribution_allowed=True,
-            commercial_use_allowed=True,
-        )
+        policy = _policy_from_source(sources.get(doc.source_id))
         body = filter_document_body(doc.body, policy) if doc.body else ""
         items.append(
             {
@@ -89,7 +114,7 @@ async def get_document(
     document_id: UUID,
     request: Request,
     session: AsyncSession = Depends(get_db),
-    tenant_id: UUID = Depends(get_tenant_id),
+    auth: AuthContext = Depends(authenticate_request),
 ) -> dict[str, Any]:
     repo = DocumentRepository(session)
     doc = await repo.get_by_id(document_id)
@@ -97,11 +122,7 @@ async def get_document(
         raise _error("DOCUMENT_NOT_FOUND", "The requested document does not exist.", request)
     source_repo = SourceRepository(session)
     source = await source_repo.get_by_id(doc.source_id)
-    policy = LicencePolicy(
-        licence_type=source.licence_type if source else "public_domain",
-        redistribution_allowed=source.redistribution_allowed if source else True,
-        commercial_use_allowed=source.commercial_use_allowed if source else True,
-    )
+    policy = _policy_from_source(source)
     return {
         "document_id": str(doc.document_id),
         "source_id": doc.source_id,
@@ -122,7 +143,7 @@ async def get_document_evidence(
     document_id: UUID,
     request: Request,
     session: AsyncSession = Depends(get_db),
-    tenant_id: UUID = Depends(get_tenant_id),
+    auth: AuthContext = Depends(authenticate_request),
 ) -> list[dict[str, Any]]:
     doc_repo = DocumentRepository(session)
     doc = await doc_repo.get_by_id(document_id)
@@ -150,7 +171,7 @@ async def list_events(
     page_size: int = Query(20, ge=1, le=100),
     event_type: str | None = None,
     session: AsyncSession = Depends(get_db),
-    tenant_id: UUID = Depends(get_tenant_id),
+    auth: AuthContext = Depends(authenticate_request),
 ) -> PaginatedResponse[dict[str, Any]]:
     repo = EventRepository(session)
     events, total = await repo.list_events(page=page, page_size=page_size, event_type=event_type)
@@ -175,7 +196,7 @@ async def get_event(
     event_id: UUID,
     request: Request,
     session: AsyncSession = Depends(get_db),
-    tenant_id: UUID = Depends(get_tenant_id),
+    auth: AuthContext = Depends(authenticate_request),
 ) -> dict[str, Any]:
     repo = EventRepository(session)
     event = await repo.get_by_id(event_id)
@@ -201,7 +222,7 @@ async def list_entities(
     page_size: int = Query(20, ge=1, le=100),
     entity_type: str | None = None,
     session: AsyncSession = Depends(get_db),
-    tenant_id: UUID = Depends(get_tenant_id),
+    auth: AuthContext = Depends(authenticate_request),
 ) -> PaginatedResponse[dict[str, Any]]:
     repo = EntityRepository(session)
     entities, total = await repo.list_entities(
@@ -226,7 +247,7 @@ async def get_entity(
     entity_id: UUID,
     request: Request,
     session: AsyncSession = Depends(get_db),
-    tenant_id: UUID = Depends(get_tenant_id),
+    auth: AuthContext = Depends(authenticate_request),
 ) -> dict[str, Any]:
     repo = EntityRepository(session)
     entity = await repo.get_by_id(entity_id)
@@ -247,7 +268,7 @@ async def list_narratives(
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     session: AsyncSession = Depends(get_db),
-    tenant_id: UUID = Depends(get_tenant_id),
+    auth: AuthContext = Depends(authenticate_request),
 ) -> PaginatedResponse[dict[str, Any]]:
     repo = NarrativeRepository(session)
     narratives, total = await repo.list_narratives(page=page, page_size=page_size)
@@ -272,7 +293,7 @@ async def get_narrative(
     narrative_id: UUID,
     request: Request,
     session: AsyncSession = Depends(get_db),
-    tenant_id: UUID = Depends(get_tenant_id),
+    auth: AuthContext = Depends(authenticate_request),
 ) -> dict[str, Any]:
     repo = NarrativeRepository(session)
     narrative = await repo.get_by_id(narrative_id)
@@ -299,7 +320,7 @@ async def get_narrative_timeline(
     narrative_id: UUID,
     request: Request,
     session: AsyncSession = Depends(get_db),
-    tenant_id: UUID = Depends(get_tenant_id),
+    auth: AuthContext = Depends(authenticate_request),
 ) -> list[dict[str, Any]]:
     from mip_database.models import Event, NarrativeEvent
 
@@ -334,7 +355,7 @@ async def get_narrative_timeline(
 async def get_signals_timeseries(
     signal_type: str | None = None,
     session: AsyncSession = Depends(get_db),
-    tenant_id: UUID = Depends(get_tenant_id),
+    auth: AuthContext = Depends(authenticate_request),
 ) -> list[dict[str, Any]]:
     repo = SignalRepository(session)
     signals, _ = await repo.list_signals(page=1, page_size=100, signal_type=signal_type)
@@ -357,7 +378,7 @@ async def list_signals(
     page_size: int = Query(20, ge=1, le=100),
     signal_type: str | None = None,
     session: AsyncSession = Depends(get_db),
-    tenant_id: UUID = Depends(get_tenant_id),
+    auth: AuthContext = Depends(authenticate_request),
 ) -> PaginatedResponse[dict[str, Any]]:
     repo = SignalRepository(session)
     signals, total = await repo.list_signals(
@@ -386,7 +407,7 @@ async def get_signal(
     signal_id: UUID,
     request: Request,
     session: AsyncSession = Depends(get_db),
-    tenant_id: UUID = Depends(get_tenant_id),
+    auth: AuthContext = Depends(authenticate_request),
 ) -> dict[str, Any]:
     repo = SignalRepository(session)
     signal = await repo.get_by_id(signal_id)
@@ -410,7 +431,8 @@ async def get_signal(
 async def search(
     body: SearchRequest,
     search_service: SearchService = Depends(get_search_service),
-    tenant_id: UUID = Depends(get_tenant_id),
+    session: AsyncSession = Depends(get_db),
+    auth: AuthContext = Depends(authenticate_request),
 ) -> SearchResponse:
     results, total, query_time_ms = await search_service.search(
         body.query,
@@ -418,10 +440,25 @@ async def search(
         page=body.page,
         page_size=body.page_size,
     )
+    source_repo = SourceRepository(session)
+    sources = await source_repo.get_by_ids(
+        list({r["source_id"] for r in results if r.get("source_id")})
+    )
     from mip_schemas.api import SearchResult
 
+    filtered_results = []
+    for r in results:
+        policy = _policy_from_source(sources.get(r.get("source_id", "")))
+        filtered_results.append(
+            SearchResult(
+                **{
+                    **r,
+                    "snippet": _filter_snippet(r.get("snippet"), policy),
+                }
+            )
+        )
     return SearchResponse(
-        results=[SearchResult(**r) for r in results],
+        results=filtered_results,
         total=total,
         page=body.page,
         page_size=body.page_size,
@@ -433,12 +470,12 @@ async def search(
 async def create_alert(
     body: dict[str, Any],
     session: AsyncSession = Depends(get_db),
-    tenant_id: UUID = Depends(get_tenant_id),
+    auth: AuthContext = Depends(require_role("admin", "analyst")),
 ) -> dict[str, Any]:
     settings = get_settings()
     alert = AlertRule(
         alert_id=uuid.uuid4(),
-        tenant_id=tenant_id,
+        tenant_id=auth.tenant_id,
         user_id=uuid.UUID(body.get("user_id", settings.default_tenant_id)),
         name=body["name"],
         entity_ids=body.get("entity_ids", []),
@@ -454,16 +491,25 @@ async def create_alert(
     )
     repo = AlertRepository(session)
     created = await repo.create(alert)
+    await audit_action(
+        session,
+        tenant_id=auth.tenant_id,
+        user_id=None,
+        action="alert.create",
+        resource_type="alert_rule",
+        resource_id=str(created.alert_id),
+        details={"name": created.name},
+    )
     return {"alert_id": str(created.alert_id), "name": created.name, "active": created.active}
 
 
 @router.get("/alerts")
 async def list_alerts(
     session: AsyncSession = Depends(get_db),
-    tenant_id: UUID = Depends(get_tenant_id),
+    auth: AuthContext = Depends(authenticate_request),
 ) -> list[dict[str, Any]]:
     repo = AlertRepository(session)
-    alerts = await repo.list_by_tenant(tenant_id)
+    alerts = await repo.list_by_tenant(auth.tenant_id)
     return [
         {
             "alert_id": str(a.alert_id),
@@ -482,17 +528,26 @@ async def update_alert(
     body: dict[str, Any],
     request: Request,
     session: AsyncSession = Depends(get_db),
-    tenant_id: UUID = Depends(get_tenant_id),
+    auth: AuthContext = Depends(require_role("admin", "analyst")),
 ) -> dict[str, Any]:
     repo = AlertRepository(session)
     alert = await repo.get_by_id(alert_id)
-    if not alert or alert.tenant_id != tenant_id:
+    if not alert or alert.tenant_id != auth.tenant_id:
         raise _error("ALERT_NOT_FOUND", "The requested alert does not exist.", request)
     if "active" in body:
         alert.active = body["active"]
     if "name" in body:
         alert.name = body["name"]
     updated = await repo.update(alert)
+    await audit_action(
+        session,
+        tenant_id=auth.tenant_id,
+        user_id=None,
+        action="alert.update",
+        resource_type="alert_rule",
+        resource_id=str(updated.alert_id),
+        details=body,
+    )
     return {"alert_id": str(updated.alert_id), "name": updated.name, "active": updated.active}
 
 
@@ -501,10 +556,18 @@ async def delete_alert(
     alert_id: UUID,
     request: Request,
     session: AsyncSession = Depends(get_db),
-    tenant_id: UUID = Depends(get_tenant_id),
+    auth: AuthContext = Depends(require_role("admin", "analyst")),
 ) -> None:
     repo = AlertRepository(session)
     alert = await repo.get_by_id(alert_id)
-    if not alert or alert.tenant_id != tenant_id:
+    if not alert or alert.tenant_id != auth.tenant_id:
         raise _error("ALERT_NOT_FOUND", "The requested alert does not exist.", request)
     await repo.delete(alert)
+    await audit_action(
+        session,
+        tenant_id=auth.tenant_id,
+        user_id=None,
+        action="alert.delete",
+        resource_type="alert_rule",
+        resource_id=str(alert_id),
+    )

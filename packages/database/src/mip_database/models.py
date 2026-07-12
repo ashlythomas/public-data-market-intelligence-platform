@@ -119,6 +119,32 @@ class DocumentDuplicate(Base):
     score: Mapped[float] = mapped_column(Float, nullable=False)
 
 
+class DocumentEmbedding(Base):
+    __tablename__ = "document_embeddings"
+
+    document_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("canonical_documents.document_id"), primary_key=True
+    )
+    model_version: Mapped[str] = mapped_column(String(32), nullable=False)
+    embedding: Mapped[list] = mapped_column(JSONB, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+
+class DocumentSentiment(Base):
+    __tablename__ = "document_sentiment"
+
+    document_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("canonical_documents.document_id"), primary_key=True
+    )
+    scores: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    model_version: Mapped[str] = mapped_column(String(32), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+
 class Entity(Base, TimestampMixin):
     __tablename__ = "entities"
 

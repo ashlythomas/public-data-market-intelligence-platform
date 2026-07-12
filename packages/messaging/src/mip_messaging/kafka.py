@@ -1,13 +1,17 @@
+import asyncio
 import json
 import logging
 from collections.abc import AsyncIterator, Callable
 from typing import Any
+from uuid import UUID
 
 from aiokafka import AIOKafkaConsumer, AIOKafkaProducer
 from mip_schemas.messaging import KafkaMessage
 from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
+
+MAX_HANDLER_RETRIES = 3
 
 RAW_TOPICS = [
     "raw.news.v1",
@@ -121,18 +125,39 @@ class KafkaConsumer:
         *,
         dlq_producer: KafkaProducer | None = None,
         dlq_topic: str | None = None,
+        max_retries: int = MAX_HANDLER_RETRIES,
     ) -> AsyncIterator[None]:
         if not self._consumer:
             raise RuntimeError("Consumer not started")
         async for msg in self._consumer:
-            try:
-                await handler(msg.value)
-                await self._consumer.commit()
-            except Exception as e:
-                logger.exception("Message processing failed", extra={"error": str(e)})
-                if dlq_producer and dlq_topic:
-                    await dlq_producer.publish_dlq(dlq_topic, msg.value, str(e))
-                await self._consumer.commit()
+            attempt = 0
+            while True:
+                try:
+                    await handler(msg.value)
+                    await self._consumer.commit()
+                    break
+                except Exception as e:
+                    attempt += 1
+                    if attempt < max_retries:
+                        logger.warning(
+                            "Message processing failed, retrying",
+                            extra={"attempt": attempt, "error": str(e)},
+                        )
+                        await asyncio.sleep(0.5 * attempt)
+                        continue
+
+                    logger.exception(
+                        "Message processing failed after retries", extra={"error": str(e)}
+                    )
+                    if dlq_producer and dlq_topic:
+                        try:
+                            await dlq_producer.publish_dlq(dlq_topic, msg.value, str(e))
+                            await self._consumer.commit()
+                        except Exception:
+                            logger.exception("DLQ publish failed; offset not committed")
+                    else:
+                        await self._consumer.commit()
+                    break
             yield
 
 
@@ -142,18 +167,26 @@ def wrap_payload(
     event_type: str,
     producer: str,
     producer_version: str,
-    correlation_id: str | None = None,
+    correlation_id: str | UUID | None = None,
 ) -> dict[str, Any]:
     if isinstance(payload, BaseModel):
         payload_dict = payload.model_dump(mode="json")
     else:
         payload_dict = payload
-    message = KafkaMessage(
-        event_type=event_type,
-        producer=producer,
-        producer_version=producer_version,
-        payload=payload_dict,
-    )
-    if correlation_id:
-        message.correlation_id = correlation_id  # type: ignore[assignment]
+
+    correlation_uuid: UUID | None = None
+    if correlation_id is not None:
+        correlation_uuid = (
+            correlation_id if isinstance(correlation_id, UUID) else UUID(str(correlation_id))
+        )
+
+    message_kwargs: dict[str, Any] = {
+        "event_type": event_type,
+        "producer": producer,
+        "producer_version": producer_version,
+        "payload": payload_dict,
+    }
+    if correlation_uuid is not None:
+        message_kwargs["correlation_id"] = correlation_uuid
+    message = KafkaMessage(**message_kwargs)
     return message.model_dump(mode="json")

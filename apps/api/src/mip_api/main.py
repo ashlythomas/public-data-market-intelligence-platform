@@ -7,23 +7,22 @@ from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import PlainTextResponse
 from mip_api.config import get_settings
+from mip_api.deps import set_search_service
 from mip_api.routes import router
 from mip_api.search import SearchService
 from mip_observability import REQUEST_COUNT, REQUEST_LATENCY, metrics_response, setup_logging
 
-_search_service: SearchService | None = None
-
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-    global _search_service
     settings = get_settings()
     setup_logging(settings.log_level)
-    _search_service = SearchService()
-    await _search_service.ensure_indices()
+    search_service = SearchService()
+    await search_service.ensure_indices()
+    app.state.search_service = search_service
+    set_search_service(search_service)
     yield
-    if _search_service:
-        await _search_service.close()
+    await search_service.close()
 
 
 def create_app() -> FastAPI:

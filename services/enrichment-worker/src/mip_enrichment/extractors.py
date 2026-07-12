@@ -86,6 +86,7 @@ def extract_events(
                     "event_type": event_type,
                     "action": action,
                     "confidence": 0.8,
+                    "magnitude": 0.6,
                     "evidence_ids": [str(evidence_id)],
                     "extraction_model_version": "rule-v0.1.0",
                     "evidence": {
