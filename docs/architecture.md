@@ -103,6 +103,63 @@ Core infrastructure:
 - OpenSearch for retrieval/search
 - Redis for distributed API rate limiting
 
+## 2.1 Source Profiles: Data and Signal Characteristics
+
+### FED (Federal Reserve)
+
+- **Primary data type**: central bank press releases, policy statements, speeches, and announcements.
+- **Typical content shape**: long-form HTML text with formal policy language and publication dates.
+- **High-value extracted signals**:
+  - monetary policy actions (rate hold/hike/cut)
+  - balance sheet and liquidity actions
+  - forward guidance tone shifts (hawkish/dovish)
+- **Operational notes**:
+  - strong source credibility for macro policy events
+  - lower document volume, high significance per item
+
+### FRED (Federal Reserve Economic Data)
+
+- **Primary data type**: economic data release feeds and macroeconomic publication updates.
+- **Typical content shape**: feed-style entries with timestamps and linked documents.
+- **High-value extracted signals**:
+  - inflation/labor/growth-related release context
+  - macro trend acceleration/deceleration references
+  - indicator-specific narrative changes around data prints
+- **Operational notes**:
+  - structured discovery via RSS-like feeds
+  - can generate frequent cadence updates tied to scheduled releases
+
+### SEC EDGAR
+
+- **Primary data type**: public company filings (currently focused on live filing feed variants).
+- **Typical content shape**: filing metadata with links to filing pages and exhibits.
+- **High-value extracted signals**:
+  - corporate actions and governance changes
+  - risk-factor, guidance, and liquidity language shifts
+  - event-driven disclosures with market implications
+- **Operational notes**:
+  - heterogeneous filing content and markup quality
+  - important for issuer-specific and sector-specific event detection
+
+### GDELT
+
+- **Primary data type**: large-scale global news event exports.
+- **Typical content shape**: high-volume batch file updates (zipped export files).
+- **High-value extracted signals**:
+  - geopolitical and cross-border event pressure
+  - supply-chain and conflict-linked narrative movement
+  - broad topic momentum and cross-region event clusters
+- **Operational notes**:
+  - highest ingestion volume among current sources
+  - useful for breadth and early weak-signal detection
+
+### Cross-Source Signal Strategy
+
+- **Macro policy lens**: FED + FRED provide policy and release context.
+- **Issuer/event lens**: SEC EDGAR contributes company-specific disclosure signals.
+- **Global breadth lens**: GDELT contributes broad event coverage and narrative emergence.
+- **Fusion outcome**: downstream workers combine event evidence into narratives and scored signals that can trigger alert rules.
+
 ## 3. Data Flow
 
 ### 3.1 Ingestion
