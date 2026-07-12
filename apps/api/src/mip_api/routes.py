@@ -1,9 +1,9 @@
-import uuid
 import ipaddress
 import socket
+import uuid
 from typing import Any
-from uuid import UUID
 from urllib.parse import urlparse
+from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from mip_api.auth import AuthContext, audit_action, authenticate_request, require_role
@@ -145,7 +145,9 @@ def _validate_alert_delivery_config(
     webhook_config = delivery_config.get("webhook")
     webhook_url = webhook_config.get("url") if isinstance(webhook_config, dict) else None
     if not isinstance(webhook_url, str) or not webhook_url.strip():
-        raise HTTPException(status_code=400, detail="webhook delivery requires delivery_config.webhook.url")
+        raise HTTPException(
+            status_code=400, detail="webhook delivery requires delivery_config.webhook.url"
+        )
 
     settings = get_settings()
     allowed_hosts = {

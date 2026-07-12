@@ -1,7 +1,7 @@
 """Alert delivery worker."""
 
-import logging
 import ipaddress
+import logging
 import os
 import socket
 from datetime import UTC, datetime

@@ -25,11 +25,10 @@ async def run_scheduled_ingestion(connector_names: list[str] | None = None) -> d
         if name not in names:
             continue
         try:
-            tenant_id = os.environ.get(f"CONNECTOR_TENANT_ID_{name.upper().replace('-', '_')}", "").strip()
+            env_key = f"CONNECTOR_TENANT_ID_{name.upper().replace('-', '_')}"
+            tenant_id = os.environ.get(env_key, "").strip()
             if not tenant_id:
-                raise RuntimeError(
-                    f"CONNECTOR_TENANT_ID_{name.upper().replace('-', '_')} must be set for {name}"
-                )
+                raise RuntimeError(f"{env_key} must be set for {name}")
             module = importlib.import_module(module_path)
             runner = getattr(module, func_name)
             logger.info("Running connector: %s", name)
