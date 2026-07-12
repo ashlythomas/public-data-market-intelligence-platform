@@ -6,7 +6,8 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
-    app_env: str = "development"
+    app_env: str = "production"
+    allow_dev_auth: bool = False
     app_name: str = "market-intelligence-api"
     log_level: str = "INFO"
     database_url: str = (
@@ -25,6 +26,7 @@ class Settings(BaseSettings):
     oidc_issuer_url: str = ""
     oidc_client_id: str = ""
     default_tenant_id: str = "00000000-0000-0000-0000-000000000001"
+    alert_webhook_allowed_hosts: str = ""
 
 
 @lru_cache

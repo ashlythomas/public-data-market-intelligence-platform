@@ -1,8 +1,12 @@
 """Alert delivery worker."""
 
+import ipaddress
 import logging
+import os
+import socket
 from datetime import UTC, datetime
 from typing import Any
+from urllib.parse import urlparse
 from uuid import uuid4
 
 import httpx
@@ -13,7 +17,48 @@ from mip_observability import setup_logging
 logger = logging.getLogger(__name__)
 
 
+def _webhook_url_is_safe(url: str) -> bool:
+    parsed = urlparse(url.strip())
+    allow_http = os.environ.get("APP_ENV", "production") == "development"
+    allowed_schemes = {"https", "http"} if allow_http else {"https"}
+    if parsed.scheme.lower() not in allowed_schemes or not parsed.hostname:
+        return False
+
+    allowed_hosts = {
+        host.strip().lower()
+        for host in os.environ.get("ALERT_WEBHOOK_ALLOWED_HOSTS", "").split(",")
+        if host.strip()
+    }
+    hostname = parsed.hostname.lower()
+    if allowed_hosts and hostname not in allowed_hosts:
+        return False
+
+    try:
+        addr_info = socket.getaddrinfo(
+            hostname,
+            parsed.port or (443 if parsed.scheme == "https" else 80),
+            type=socket.SOCK_STREAM,
+        )
+    except socket.gaierror:
+        return False
+
+    for _, _, _, _, sockaddr in addr_info:
+        ip = ipaddress.ip_address(sockaddr[0])
+        if (
+            ip.is_private
+            or ip.is_loopback
+            or ip.is_link_local
+            or ip.is_multicast
+            or ip.is_reserved
+            or ip.is_unspecified
+        ):
+            return False
+    return True
+
+
 async def deliver_webhook(url: str, payload: dict[str, Any]) -> bool:
+    if not _webhook_url_is_safe(url):
+        raise ValueError("unsafe webhook URL")
     async with httpx.AsyncClient(timeout=30.0) as client:
         response = await client.post(url, json=payload)
         return response.is_success

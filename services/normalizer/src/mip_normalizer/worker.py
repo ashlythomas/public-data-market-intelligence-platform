@@ -103,58 +103,83 @@ async def process_raw_message(
         doc_repo = DocumentRepository(session)
 
         existing_by_id = await doc_repo.get_by_ingestion_id(document_id)
-        if existing_by_id:
+        if existing_by_id is not None:
             DOCUMENT_THROUGHPUT.labels(service="normalizer", status="duplicate").inc()
             return
+        if existing_by_id is None:
+            existing = await doc_repo.get_by_content_hash(normalized["content_hash"])
+            if existing:
+                published_at = None
+                if normalized.get("published_at"):
+                    published_at = datetime.fromisoformat(normalized["published_at"])
+                duplicate_doc = CanonicalDocument(
+                    document_id=document_id,
+                    source_id=normalized["source_id"],
+                    external_id=normalized.get("external_id"),
+                    canonical_url=normalized["canonical_url"],
+                    title=normalized.get("title"),
+                    body=normalized["body"],
+                    summary=normalized.get("summary"),
+                    language=normalized.get("language", "en"),
+                    published_at=published_at,
+                    retrieved_at=datetime.fromisoformat(normalized["retrieved_at"]),
+                    document_type=normalized.get("document_type", "article"),
+                    country_codes=normalized.get("country_codes", []),
+                    topic_labels=normalized.get("topic_labels", []),
+                    content_hash=normalized["content_hash"],
+                    parser_version=normalized["parser_version"],
+                    source_record_id=normalized["source_record_id"],
+                    is_canonical=False,
+                )
+                await doc_repo.create(duplicate_doc)
+                session.add(
+                    DocumentDuplicate(
+                        canonical_document_id=existing.document_id,
+                        duplicate_document_id=document_id,
+                        method="exact_hash",
+                        score=1.0,
+                    )
+                )
+                await session.commit()
+                DOCUMENT_THROUGHPUT.labels(service="normalizer", status="duplicate").inc()
+                return
 
-        existing = await doc_repo.get_by_content_hash(normalized["content_hash"])
-        if existing:
-            dup = DocumentDuplicate(
-                canonical_document_id=existing.document_id,
-                duplicate_document_id=document_id,
-                method="exact_hash",
-                score=1.0,
+            recent_docs = await doc_repo.get_recent_for_dedup(limit=100)
+            fingerprints = [
+                (str(d.document_id), simhash((d.title or "") + " " + d.body[:500]))
+                for d in recent_docs
+            ]
+            near = near_duplicate_check(
+                (normalized.get("title") or "") + " " + normalized["body"],
+                fingerprints,
+                threshold=8,
             )
-            session.add(dup)
+
+            published_at = None
+            if normalized.get("published_at"):
+                published_at = datetime.fromisoformat(normalized["published_at"])
+
+            doc = CanonicalDocument(
+                document_id=document_id,
+                source_id=normalized["source_id"],
+                external_id=normalized.get("external_id"),
+                canonical_url=normalized["canonical_url"],
+                title=normalized.get("title"),
+                body=normalized["body"],
+                summary=normalized.get("summary"),
+                language=normalized.get("language", "en"),
+                published_at=published_at,
+                retrieved_at=datetime.fromisoformat(normalized["retrieved_at"]),
+                document_type=normalized.get("document_type", "article"),
+                country_codes=normalized.get("country_codes", []),
+                topic_labels=normalized.get("topic_labels", []),
+                content_hash=normalized["content_hash"],
+                parser_version=normalized["parser_version"],
+                source_record_id=normalized["source_record_id"],
+                is_canonical=not near.is_duplicate,
+            )
+            await doc_repo.create(doc)
             await session.commit()
-            DOCUMENT_THROUGHPUT.labels(service="normalizer", status="duplicate").inc()
-            return
-
-        recent_docs = await doc_repo.get_recent_for_dedup(limit=100)
-        fingerprints = [
-            (str(d.document_id), simhash((d.title or "") + " " + d.body[:500])) for d in recent_docs
-        ]
-        near = near_duplicate_check(
-            (normalized.get("title") or "") + " " + normalized["body"],
-            fingerprints,
-            threshold=8,
-        )
-
-        published_at = None
-        if normalized.get("published_at"):
-            published_at = datetime.fromisoformat(normalized["published_at"])
-
-        doc = CanonicalDocument(
-            document_id=document_id,
-            source_id=normalized["source_id"],
-            external_id=normalized.get("external_id"),
-            canonical_url=normalized["canonical_url"],
-            title=normalized.get("title"),
-            body=normalized["body"],
-            summary=normalized.get("summary"),
-            language=normalized.get("language", "en"),
-            published_at=published_at,
-            retrieved_at=datetime.fromisoformat(normalized["retrieved_at"]),
-            document_type=normalized.get("document_type", "article"),
-            country_codes=normalized.get("country_codes", []),
-            topic_labels=normalized.get("topic_labels", []),
-            content_hash=normalized["content_hash"],
-            parser_version=normalized["parser_version"],
-            source_record_id=normalized["source_record_id"],
-            is_canonical=not near.is_duplicate,
-        )
-        await doc_repo.create(doc)
-        await session.commit()
 
     await asyncio.to_thread(resources.indexer.index_document, normalized)
 

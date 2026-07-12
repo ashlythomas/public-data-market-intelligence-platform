@@ -1,5 +1,8 @@
+import ipaddress
+import socket
 import uuid
 from typing import Any
+from urllib.parse import urlparse
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
@@ -7,7 +10,7 @@ from mip_api.auth import AuthContext, audit_action, authenticate_request, requir
 from mip_api.config import get_settings
 from mip_api.deps import get_db, get_search_service
 from mip_api.search import SearchService
-from mip_database.models import AlertRule, Source
+from mip_database.models import AlertRule, Source, User
 from mip_database.repositories import (
     AlertRepository,
     DocumentRepository,
@@ -26,9 +29,34 @@ from mip_schemas.api import (
     SearchResponse,
 )
 from mip_source_licensing import LicencePolicy, can_serve_full_content, filter_document_body
+from pydantic import BaseModel, Field
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 router = APIRouter(prefix="/v1")
+
+
+class AlertCreateRequest(BaseModel):
+    user_id: UUID
+    name: str = Field(min_length=1, max_length=255)
+    entity_ids: list[str] = Field(default_factory=list)
+    topic_labels: list[str] = Field(default_factory=list)
+    event_types: list[str] = Field(default_factory=list)
+    signal_types: list[str] = Field(default_factory=list)
+    minimum_confidence: float = Field(default=0.5, ge=0.0, le=1.0)
+    minimum_score: float = Field(default=0.5, ge=0.0, le=1.0)
+    countries: list[str] = Field(default_factory=list)
+    delivery_channels: list[str] = Field(default_factory=lambda: ["email"])
+    delivery_config: dict[str, Any] = Field(default_factory=dict)
+    cooldown_period_seconds: int = Field(default=3600, ge=0)
+
+
+class AlertUpdateRequest(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=255)
+    active: bool | None = None
+    delivery_channels: list[str] | None = None
+    delivery_config: dict[str, Any] | None = None
+    cooldown_period_seconds: int | None = Field(default=None, ge=0)
 
 
 def _error(code: str, message: str, request: Request, details: dict | None = None) -> HTTPException:
@@ -49,27 +77,93 @@ def _error(code: str, message: str, request: Request, details: dict | None = Non
 def _policy_from_source(source: Source | None) -> LicencePolicy:
     if source is None:
         return LicencePolicy(
-            licence_type="public_domain",
-            redistribution_allowed=True,
-            commercial_use_allowed=True,
+            licence_type="unknown",
+            redistribution_allowed=False,
+            commercial_use_allowed=False,
+            quotation_limit=200,
         )
     return LicencePolicy(
         licence_type=source.licence_type,
         redistribution_allowed=source.redistribution_allowed,
         commercial_use_allowed=source.commercial_use_allowed,
+        quotation_limit=200 if not source.redistribution_allowed else None,
         attribution_required=source.licence_type == "attribution_required",
     )
 
 
-def _filter_snippet(snippet: str | None, policy: LicencePolicy) -> str | None:
-    if not snippet:
-        return snippet
-    if not policy.redistribution_allowed:
-        if policy.quotation_allowed:
-            limit = policy.quotation_limit or 200
-            return snippet[:limit]
-        return None
-    return snippet
+def _filter_licensed_text(text: str | None, policy: LicencePolicy) -> str:
+    if not text:
+        return ""
+    return filter_document_body(text, policy)
+
+
+def _is_public_webhook_url(
+    raw_url: str, *, allowed_hosts: set[str], allow_insecure_http: bool
+) -> bool:
+    parsed = urlparse(raw_url.strip())
+    allowed_schemes = {"https"}
+    if allow_insecure_http:
+        allowed_schemes.add("http")
+    if parsed.scheme.lower() not in allowed_schemes or not parsed.hostname:
+        return False
+    hostname = parsed.hostname.lower()
+    if allowed_hosts and hostname not in allowed_hosts:
+        return False
+
+    try:
+        addr_info = socket.getaddrinfo(
+            hostname,
+            parsed.port or (443 if parsed.scheme == "https" else 80),
+            type=socket.SOCK_STREAM,
+        )
+    except socket.gaierror:
+        return False
+
+    for _, _, _, _, sockaddr in addr_info:
+        ip = ipaddress.ip_address(sockaddr[0])
+        if (
+            ip.is_private
+            or ip.is_loopback
+            or ip.is_link_local
+            or ip.is_multicast
+            or ip.is_reserved
+            or ip.is_unspecified
+        ):
+            return False
+    return True
+
+
+def _validate_alert_delivery_config(
+    delivery_channels: list[str], delivery_config: dict[str, Any]
+) -> None:
+    if not isinstance(delivery_config, dict):
+        raise HTTPException(status_code=400, detail="delivery_config must be an object")
+
+    if "webhook" not in delivery_channels:
+        return
+
+    webhook_config = delivery_config.get("webhook")
+    webhook_url = webhook_config.get("url") if isinstance(webhook_config, dict) else None
+    if not isinstance(webhook_url, str) or not webhook_url.strip():
+        raise HTTPException(
+            status_code=400, detail="webhook delivery requires delivery_config.webhook.url"
+        )
+
+    settings = get_settings()
+    allowed_hosts = {
+        host.strip().lower()
+        for host in settings.alert_webhook_allowed_hosts.split(",")
+        if host.strip()
+    }
+    if not _is_public_webhook_url(
+        webhook_url,
+        allowed_hosts=allowed_hosts,
+        allow_insecure_http=settings.app_env == "development",
+    ):
+        raise HTTPException(
+            status_code=400,
+            detail="webhook URL must resolve to a public host and use an allowed scheme",
+        )
 
 
 @router.get("/documents")
@@ -128,7 +222,7 @@ async def get_document(
         "source_id": doc.source_id,
         "title": doc.title,
         "body": filter_document_body(doc.body, policy),
-        "summary": doc.summary,
+        "summary": _filter_licensed_text(doc.summary, policy),
         "language": doc.language,
         "published_at": doc.published_at.isoformat() if doc.published_at else None,
         "topic_labels": doc.topic_labels,
@@ -149,6 +243,8 @@ async def get_document_evidence(
     doc = await doc_repo.get_by_id(document_id)
     if not doc:
         raise _error("DOCUMENT_NOT_FOUND", "The requested document does not exist.", request)
+    source = await SourceRepository(session).get_by_id(doc.source_id)
+    policy = _policy_from_source(source)
     evidence_repo = EvidenceRepository(session)
     spans = await evidence_repo.get_by_document(document_id)
     return [
@@ -156,7 +252,7 @@ async def get_document_evidence(
             "evidence_id": str(s.evidence_id),
             "start_offset": s.start_offset,
             "end_offset": s.end_offset,
-            "text": s.text,
+            "text": _filter_licensed_text(s.text, policy),
             "source_url": s.source_url,
             "confidence": s.confidence,
             "model_version": s.model_version,
@@ -453,7 +549,7 @@ async def search(
             SearchResult(
                 **{
                     **r,
-                    "snippet": _filter_snippet(r.get("snippet"), policy),
+                    "snippet": _filter_licensed_text(r.get("snippet"), policy),
                 }
             )
         )
@@ -468,25 +564,36 @@ async def search(
 
 @router.post("/alerts")
 async def create_alert(
-    body: dict[str, Any],
+    body: AlertCreateRequest,
     session: AsyncSession = Depends(get_db),
     auth: AuthContext = Depends(require_role("admin", "analyst")),
 ) -> dict[str, Any]:
-    settings = get_settings()
+    user_result = await session.execute(
+        select(User).where(
+            User.user_id == body.user_id,
+            User.tenant_id == auth.tenant_id,
+            User.active.is_(True),
+        )
+    )
+    if user_result.scalar_one_or_none() is None:
+        raise HTTPException(status_code=400, detail="User does not belong to authenticated tenant")
+    _validate_alert_delivery_config(body.delivery_channels, body.delivery_config)
+
     alert = AlertRule(
         alert_id=uuid.uuid4(),
         tenant_id=auth.tenant_id,
-        user_id=uuid.UUID(body.get("user_id", settings.default_tenant_id)),
-        name=body["name"],
-        entity_ids=body.get("entity_ids", []),
-        topic_labels=body.get("topic_labels", []),
-        event_types=body.get("event_types", []),
-        signal_types=body.get("signal_types", []),
-        minimum_confidence=body.get("minimum_confidence", 0.5),
-        minimum_score=body.get("minimum_score", 0.5),
-        countries=body.get("countries", []),
-        delivery_channels=body.get("delivery_channels", ["email"]),
-        cooldown_period_seconds=body.get("cooldown_period", 3600),
+        user_id=body.user_id,
+        name=body.name,
+        entity_ids=body.entity_ids,
+        topic_labels=body.topic_labels,
+        event_types=body.event_types,
+        signal_types=body.signal_types,
+        minimum_confidence=body.minimum_confidence,
+        minimum_score=body.minimum_score,
+        countries=body.countries,
+        delivery_channels=body.delivery_channels,
+        delivery_config=body.delivery_config,
+        cooldown_period_seconds=body.cooldown_period_seconds,
         active=True,
     )
     repo = AlertRepository(session)
@@ -498,7 +605,7 @@ async def create_alert(
         action="alert.create",
         resource_type="alert_rule",
         resource_id=str(created.alert_id),
-        details={"name": created.name},
+        details={"name": created.name, "user_id": str(body.user_id)},
     )
     return {"alert_id": str(created.alert_id), "name": created.name, "active": created.active}
 
@@ -525,7 +632,7 @@ async def list_alerts(
 @router.patch("/alerts/{alert_id}")
 async def update_alert(
     alert_id: UUID,
-    body: dict[str, Any],
+    body: AlertUpdateRequest,
     request: Request,
     session: AsyncSession = Depends(get_db),
     auth: AuthContext = Depends(require_role("admin", "analyst")),
@@ -534,10 +641,18 @@ async def update_alert(
     alert = await repo.get_by_id(alert_id)
     if not alert or alert.tenant_id != auth.tenant_id:
         raise _error("ALERT_NOT_FOUND", "The requested alert does not exist.", request)
-    if "active" in body:
-        alert.active = body["active"]
-    if "name" in body:
-        alert.name = body["name"]
+    payload = body.model_dump(exclude_none=True)
+    if "active" in payload:
+        alert.active = payload["active"]
+    if "name" in payload:
+        alert.name = payload["name"]
+    if "delivery_channels" in payload:
+        alert.delivery_channels = payload["delivery_channels"]
+    if "delivery_config" in payload:
+        alert.delivery_config = payload["delivery_config"]
+    _validate_alert_delivery_config(alert.delivery_channels, alert.delivery_config)
+    if "cooldown_period_seconds" in payload:
+        alert.cooldown_period_seconds = payload["cooldown_period_seconds"]
     updated = await repo.update(alert)
     await audit_action(
         session,
@@ -546,7 +661,7 @@ async def update_alert(
         action="alert.update",
         resource_type="alert_rule",
         resource_id=str(updated.alert_id),
-        details=body,
+        details=payload,
     )
     return {"alert_id": str(updated.alert_id), "name": updated.name, "active": updated.active}
 

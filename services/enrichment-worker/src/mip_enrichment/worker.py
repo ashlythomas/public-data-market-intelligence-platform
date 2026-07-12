@@ -50,6 +50,7 @@ async def process_enrichment_message(
 ) -> None:
     payload = message.get("payload", message)
     document_id = uuid.UUID(payload["document_id"])
+    tenant_id = payload.get("tenant_id")
     body = payload.get("body", "")
     source_url = payload.get("canonical_url", "")
 
@@ -72,6 +73,9 @@ async def process_enrichment_message(
             await session.flush()
 
         for ent in entities_data:
+            mention_id = uuid.UUID(ent["mention_id"])
+            if await session.get(EntityMention, mention_id):
+                continue
             existing = await entity_repo.find_by_alias(ent["text"], ent["entity_type"])
             if existing is None:
                 existing = await entity_repo.find_by_canonical_name(ent["text"], ent["entity_type"])
@@ -85,7 +89,7 @@ async def process_enrichment_message(
 
             session.add(
                 EntityMention(
-                    mention_id=uuid.UUID(ent["mention_id"]),
+                    mention_id=mention_id,
                     document_id=document_id,
                     text=ent["text"],
                     entity_type=ent["entity_type"],
@@ -100,8 +104,11 @@ async def process_enrichment_message(
 
         for evt in events_data:
             evidence = evt["evidence"]
+            event_id = uuid.UUID(evt["event_id"])
+            if await session.get(Event, event_id):
+                continue
             event = Event(
-                event_id=uuid.UUID(evt["event_id"]),
+                event_id=event_id,
                 document_id=document_id,
                 event_type=evt["event_type"],
                 action=evt["action"],
@@ -124,7 +131,7 @@ async def process_enrichment_message(
             )
             session.add(
                 EventEvidence(
-                    event_id=uuid.UUID(evt["event_id"]),
+                    event_id=event_id,
                     evidence_id=uuid.UUID(evidence["evidence_id"]),
                 )
             )
@@ -138,7 +145,7 @@ async def process_enrichment_message(
         await session.commit()
 
     entity_msg = wrap_payload(
-        {"document_id": str(document_id), "entities": entities_data},
+        {"document_id": str(document_id), "tenant_id": tenant_id, "entities": entities_data},
         event_type="entities.extracted",
         producer="enrichment-worker",
         producer_version="0.1.0",
@@ -147,7 +154,11 @@ async def process_enrichment_message(
 
     if events_data:
         event_msg = wrap_payload(
-            {"document_id": str(document_id), "events": events_data},
+            {
+                "document_id": str(document_id),
+                "tenant_id": tenant_id,
+                "events": events_data,
+            },
             event_type="events.extracted",
             producer="enrichment-worker",
             producer_version="0.1.0",
@@ -157,6 +168,7 @@ async def process_enrichment_message(
     embed_msg = wrap_payload(
         {
             "document_id": str(document_id),
+            "tenant_id": tenant_id,
             "embedding": embed_response.embeddings[0],
             "model_version": embed_response.model_version,
             "sentiment": sentiment,

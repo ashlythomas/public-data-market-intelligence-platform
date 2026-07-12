@@ -17,7 +17,7 @@ class GdeltConnector(BaseConnector):
 
     async def discover(self, checkpoint: dict[str, Any] | None = None) -> AsyncIterator[SourceItem]:
         self.load_checkpoint(checkpoint)
-        seen_urls: set[str] = set(self._checkpoint.get("seen_urls", []))
+        self._seen_urls: set[str] = set(self._checkpoint.get("seen_urls", []))
 
         response = await self.client.get(GDELT_LASTUPDATE)
         response.raise_for_status()
@@ -31,9 +31,8 @@ class GdeltConnector(BaseConnector):
             if not filename.endswith(".export.CSV.zip"):
                 continue
             url = f"{GDELT_BASE}{filename}"
-            if url in seen_urls:
+            if url in self._seen_urls:
                 continue
-            seen_urls.add(url)
             yield SourceItem(
                 external_id=filename.replace(".export.CSV.zip", ""),
                 url=url,
@@ -41,8 +40,11 @@ class GdeltConnector(BaseConnector):
                 metadata={"filename": filename, "format": "export_csv_zip"},
             )
 
-        self._checkpoint["seen_urls"] = list(seen_urls)[-200:]
         self._checkpoint["last_discover_at"] = datetime.now(UTC).isoformat()
+
+    def mark_processed(self, item: SourceItem) -> None:
+        self._seen_urls.add(item.url)
+        self._checkpoint["seen_urls"] = list(self._seen_urls)[-200:]
 
     async def fetch(self, item: SourceItem) -> RawPayload:
         response = await self.client.get(item.url)

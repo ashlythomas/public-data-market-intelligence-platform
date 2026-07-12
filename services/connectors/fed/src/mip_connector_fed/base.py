@@ -68,6 +68,10 @@ class BaseConnector(ABC):
     async def checkpoint(self) -> dict[str, Any]:
         return self._checkpoint.copy()
 
+    def mark_processed(self, item: SourceItem) -> None:
+        """Mark a discovered item as durably processed."""
+        return
+
     @abstractmethod
     async def discover(
         self, checkpoint: dict[str, Any] | None = None

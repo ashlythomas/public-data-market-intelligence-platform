@@ -21,16 +21,37 @@ async def evaluate_alert_candidate(payload: dict[str, Any]) -> list[dict[str, An
     setup_logging()
     signal_type = payload.get("signal_type")
     score = payload.get("score", 0.0)
+    confidence = payload.get("confidence", 0.0)
+    tenant_id = uuid.UUID(payload["tenant_id"])
     deliveries: list[dict[str, Any]] = []
 
     async with async_session_factory() as session:
-        result = await session.execute(select(AlertRule).where(AlertRule.active.is_(True)))
+        result = await session.execute(
+            select(AlertRule).where(
+                AlertRule.active.is_(True),
+                AlertRule.tenant_id == tenant_id,
+            )
+        )
         rules = list(result.scalars().all())
 
         for rule in rules:
             if rule.signal_types and signal_type not in rule.signal_types:
                 continue
             if score < rule.minimum_score:
+                continue
+            if confidence < rule.minimum_confidence:
+                continue
+            if rule.entity_ids and not {str(value) for value in rule.entity_ids} & {
+                str(value) for value in payload.get("entity_ids", [])
+            }:
+                continue
+            if rule.topic_labels and not set(rule.topic_labels) & set(
+                payload.get("topic_labels", [])
+            ):
+                continue
+            if rule.event_types and payload.get("event_type") not in rule.event_types:
+                continue
+            if rule.countries and not set(rule.countries) & set(payload.get("countries", [])):
                 continue
 
             cooldown_key = f"{rule.alert_id}:{signal_type}"
@@ -41,10 +62,14 @@ async def evaluate_alert_candidate(payload: dict[str, Any]) -> list[dict[str, An
                 continue
 
             for channel in rule.delivery_channels:
+                config = rule.delivery_config or {}
+                channel_config = config.get(channel, {}) if isinstance(config, dict) else {}
                 deliveries.append(
                     {
                         "alert_id": str(rule.alert_id),
                         "channel": channel,
+                        "email": channel_config.get("to"),
+                        "webhook_url": channel_config.get("url"),
                         "delivery_payload": {
                             "subject": f"Signal alert: {signal_type}",
                             "signal_type": signal_type,
@@ -66,16 +91,30 @@ async def record_delivery(
     payload: dict[str, Any],
     error: str | None = None,
 ) -> None:
+    signal_id = str(payload.get("signal_id", "unknown"))
+    delivery_id = uuid.uuid5(alert_id, f"{signal_id}:{channel}")
     async with async_session_factory() as session:
-        session.add(
-            AlertDelivery(
-                delivery_id=uuid.uuid4(),
+        delivery = await session.get(AlertDelivery, delivery_id)
+        if delivery is None:
+            delivery = AlertDelivery(
+                delivery_id=delivery_id,
                 alert_id=alert_id,
                 channel=channel,
-                status=status,
-                delivered_at=datetime.now(UTC) if status == "delivered" else None,
                 payload=payload,
-                error_message=error,
             )
-        )
+            session.add(delivery)
+        delivery.status = status
+        delivery.delivered_at = datetime.now(UTC) if status == "delivered" else None
+        delivery.error_message = error
         await session.commit()
+
+
+async def delivery_was_successful(
+    alert_id: uuid.UUID,
+    channel: str,
+    signal_id: str,
+) -> bool:
+    delivery_id = uuid.uuid5(alert_id, f"{signal_id}:{channel}")
+    async with async_session_factory() as session:
+        delivery = await session.get(AlertDelivery, delivery_id)
+        return delivery is not None and delivery.status == "delivered"

@@ -18,6 +18,24 @@ def test_extract_entities_fed():
     assert any("Federal Reserve" in e["text"] for e in entities)
 
 
+def test_extraction_ids_are_deterministic_for_replay():
+    text = "The Federal Reserve decided to maintain the target range for the federal funds rate."
+    doc_id = uuid.uuid4()
+
+    first_entities = extract_entities(text, doc_id)
+    second_entities = extract_entities(text, doc_id)
+    first_events = extract_events(text, doc_id, "https://example.com")
+    second_events = extract_events(text, doc_id, "https://example.com")
+
+    assert [item["mention_id"] for item in first_entities] == [
+        item["mention_id"] for item in second_entities
+    ]
+    assert [item["event_id"] for item in first_events] == [
+        item["event_id"] for item in second_events
+    ]
+    assert first_events[0]["evidence_ids"] == second_events[0]["evidence_ids"]
+
+
 def test_classify_topics_inflation():
     text = "Inflation remains elevated according to the CPI report."
     topics = classify_topics(text)

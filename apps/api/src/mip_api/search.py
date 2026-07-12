@@ -85,6 +85,8 @@ class SearchService:
         filters: dict[str, Any],
         page: int,
         page_size: int,
+        index: str = DOCUMENTS_INDEX,
+        result_type: str = "document",
     ) -> tuple[list[dict[str, Any]], int]:
         must_clauses: list[dict[str, Any]] = [
             {
@@ -117,7 +119,7 @@ class SearchService:
                 }
             },
         }
-        response = self.client.search(index=DOCUMENTS_INDEX, body=body)
+        response = self.client.search(index=index, body=body)
         hits = response["hits"]["hits"]
         total = response["hits"]["total"]["value"]
         results = []
@@ -127,20 +129,41 @@ class SearchService:
             if "highlight" in hit:
                 highlights = hit["highlight"]
                 snippet = highlights.get("body", highlights.get("title", [None]))[0]
+
+            if result_type == "event":
+                item_id = source.get("event_id", hit["_id"])
+                title = source.get("title") or source.get("action") or source.get("event_type")
+                provenance = {
+                    "source_id": source.get("source_id"),
+                    "event_id": source.get("event_id"),
+                    "document_id": source.get("document_id"),
+                }
+            elif result_type == "narrative":
+                item_id = source.get("narrative_id", hit["_id"])
+                title = source.get("title") or source.get("description")
+                provenance = {
+                    "source_id": source.get("source_id"),
+                    "narrative_id": source.get("narrative_id"),
+                }
+            else:
+                item_id = source.get("document_id", hit["_id"])
+                title = source.get("title")
+                provenance = {
+                    "source_id": source.get("source_id"),
+                    "document_id": source.get("document_id"),
+                    "content_hash": source.get("content_hash"),
+                }
+
             results.append(
                 {
-                    "id": source.get("document_id", hit["_id"]),
-                    "type": "document",
-                    "title": source.get("title"),
+                    "id": item_id,
+                    "type": result_type,
+                    "title": title,
                     "snippet": snippet or source.get("summary", "")[:200],
                     "score": hit["_score"],
                     "source_id": source.get("source_id"),
                     "published_at": source.get("published_at"),
-                    "provenance": {
-                        "source_id": source.get("source_id"),
-                        "document_id": source.get("document_id"),
-                        "content_hash": source.get("content_hash"),
-                    },
+                    "provenance": provenance,
                 }
             )
         return results, total
@@ -186,21 +209,47 @@ class SearchService:
     ) -> tuple[list[dict[str, Any]], int, float]:
         start = time.monotonic()
         filters = filters or {}
+        fetch_size = page * page_size
 
         if hybrid:
-            keyword_results, total = await asyncio.to_thread(
-                self._keyword_search, query, filters=filters, page=page, page_size=page_size
+            keyword_results, doc_total = await asyncio.to_thread(
+                self._keyword_search,
+                query,
+                filters=filters,
+                page=1,
+                page_size=fetch_size,
+                index=DOCUMENTS_INDEX,
+                result_type="document",
             )
-            semantic_results = await asyncio.to_thread(self._semantic_search, query, page_size)
-            fused = _reciprocal_rank_fusion(keyword_results, semantic_results)
+            semantic_results = await asyncio.to_thread(self._semantic_search, query, fetch_size)
+            combined = _reciprocal_rank_fusion(keyword_results, semantic_results)
+            start_index = (page - 1) * page_size
+            end_index = start_index + page_size
             elapsed_ms = (time.monotonic() - start) * 1000
-            return fused[:page_size], total, elapsed_ms
+            return (
+                combined[start_index:end_index],
+                doc_total,
+                elapsed_ms,
+            )
 
-        results, total = await asyncio.to_thread(
-            self._keyword_search, query, filters=filters, page=page, page_size=page_size
+        doc_results, doc_total = await asyncio.to_thread(
+            self._keyword_search,
+            query,
+            filters=filters,
+            page=1,
+            page_size=fetch_size,
+            index=DOCUMENTS_INDEX,
+            result_type="document",
         )
+        combined = sorted(doc_results, key=lambda item: float(item.get("score", 0.0)), reverse=True)
+        start_index = (page - 1) * page_size
+        end_index = start_index + page_size
         elapsed_ms = (time.monotonic() - start) * 1000
-        return results, total, elapsed_ms
+        return (
+            combined[start_index:end_index],
+            doc_total,
+            elapsed_ms,
+        )
 
     async def close(self) -> None:
         pass

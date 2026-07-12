@@ -126,6 +126,7 @@ def normalize_document(
         )
     return {
         "document_id": str(document_id),
+        "tenant_id": raw_envelope.get("tenant_id"),
         "source_id": source_id,
         "external_id": raw_envelope.get("external_id"),
         "canonical_url": source_url,

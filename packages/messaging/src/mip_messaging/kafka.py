@@ -155,8 +155,10 @@ class KafkaConsumer:
                             await self._consumer.commit()
                         except Exception:
                             logger.exception("DLQ publish failed; offset not committed")
+                            raise
                     else:
-                        await self._consumer.commit()
+                        logger.error("No DLQ configured; stopping without committing offset")
+                        raise
                     break
             yield
 

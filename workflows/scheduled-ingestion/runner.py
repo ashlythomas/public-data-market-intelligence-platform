@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+import os
 from datetime import UTC, datetime
 
 logger = logging.getLogger(__name__)
@@ -24,10 +25,14 @@ async def run_scheduled_ingestion(connector_names: list[str] | None = None) -> d
         if name not in names:
             continue
         try:
+            env_key = f"CONNECTOR_TENANT_ID_{name.upper().replace('-', '_')}"
+            tenant_id = os.environ.get(env_key, "").strip()
+            if not tenant_id:
+                raise RuntimeError(f"{env_key} must be set for {name}")
             module = importlib.import_module(module_path)
             runner = getattr(module, func_name)
             logger.info("Running connector: %s", name)
-            results[name] = await runner()
+            results[name] = await runner(tenant_id=tenant_id)
         except Exception as e:
             logger.exception("Connector %s failed: %s", name, e)
             results[name] = {"error": str(e)}

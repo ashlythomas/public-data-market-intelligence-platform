@@ -54,6 +54,16 @@ async def update_narrative(
     sentiment_score: float = 0.0,
 ) -> Narrative:
     """Create or update narrative for related events."""
+    linked_result = await session.execute(
+        select(Narrative)
+        .join(NarrativeEvent, NarrativeEvent.narrative_id == Narrative.narrative_id)
+        .where(NarrativeEvent.event_id == event.event_id)
+        .limit(1)
+    )
+    linked_narrative = linked_result.scalar_one_or_none()
+    if linked_narrative is not None:
+        return linked_narrative
+
     result = await session.execute(
         select(Narrative)
         .where(Narrative.lifecycle_state.in_(["emerging", "accelerating", "established"]))
@@ -136,8 +146,13 @@ async def generate_signal_for_event(
         narrative_ids=[narrative.narrative_id],
     )
 
+    signal_id = uuid.uuid5(event.event_id, signal_data["calculation_version"])
+    existing_signal = await session.get(Signal, signal_id)
+    if existing_signal is not None:
+        return existing_signal
+
     signal = Signal(
-        signal_id=uuid.UUID(signal_data["signal_id"]),
+        signal_id=signal_id,
         signal_type=signal_type,
         direction=signal_data["direction"],
         score=signal_data["score"],
