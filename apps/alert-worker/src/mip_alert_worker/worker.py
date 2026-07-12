@@ -19,7 +19,8 @@ logger = logging.getLogger(__name__)
 
 def _webhook_url_is_safe(url: str) -> bool:
     parsed = urlparse(url.strip())
-    allow_http = os.environ.get("APP_ENV", "production") == "development"
+    is_development = os.environ.get("APP_ENV", "production") == "development"
+    allow_http = is_development
     allowed_schemes = {"https", "http"} if allow_http else {"https"}
     if parsed.scheme.lower() not in allowed_schemes or not parsed.hostname:
         return False
@@ -29,6 +30,8 @@ def _webhook_url_is_safe(url: str) -> bool:
         for host in os.environ.get("ALERT_WEBHOOK_ALLOWED_HOSTS", "").split(",")
         if host.strip()
     }
+    if not is_development and not allowed_hosts:
+        return False
     hostname = parsed.hostname.lower()
     if allowed_hosts and hostname not in allowed_hosts:
         return False
@@ -59,7 +62,7 @@ def _webhook_url_is_safe(url: str) -> bool:
 async def deliver_webhook(url: str, payload: dict[str, Any]) -> bool:
     if not _webhook_url_is_safe(url):
         raise ValueError("unsafe webhook URL")
-    async with httpx.AsyncClient(timeout=30.0) as client:
+    async with httpx.AsyncClient(timeout=30.0, follow_redirects=False) as client:
         response = await client.post(url, json=payload)
         return response.is_success
 
