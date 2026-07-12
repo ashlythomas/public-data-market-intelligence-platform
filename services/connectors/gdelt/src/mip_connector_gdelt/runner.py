@@ -2,9 +2,9 @@
 
 import asyncio
 
-from mip_database.config import get_settings
 from mip_connector_fed.shared_runner import run_connector
 from mip_connector_gdelt.connector import GdeltConnector
+from mip_database.config import get_settings
 
 
 async def run_gdelt_connector() -> dict:

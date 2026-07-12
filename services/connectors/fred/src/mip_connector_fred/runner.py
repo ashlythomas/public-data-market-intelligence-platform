@@ -3,9 +3,9 @@
 import asyncio
 import logging
 
-from mip_database.config import get_settings
 from mip_connector_fed.runner import run_connector
 from mip_connector_fred.connector import FredConnector
+from mip_database.config import get_settings
 
 logger = logging.getLogger(__name__)
 

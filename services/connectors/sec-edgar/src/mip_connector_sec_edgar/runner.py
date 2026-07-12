@@ -2,9 +2,9 @@
 
 import asyncio
 
-from mip_database.config import get_settings
 from mip_connector_fed.runner import run_connector
 from mip_connector_sec_edgar.connector import SecEdgarConnector
+from mip_database.config import get_settings
 
 
 async def run_sec_edgar_connector() -> dict:
